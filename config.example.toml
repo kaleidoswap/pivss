@@ -1,0 +1,39 @@
+# PIVSS server configuration — copy to config.toml and adjust.
+# Every field is optional; defaults shown.
+
+listen = "127.0.0.1:8339"
+data_dir = "./pivss-data"
+name = "pivss-demo"
+description = "P2P incentivized versioned storage for Lightning & RGB backups"
+# Public base URL clients should use (goes into the nostr announcement).
+public_endpoint = "http://127.0.0.1:8339"
+
+# Pricing: sats per stored MiB per billing period.
+price_sats_per_mib = 21
+billing_period_secs = 86400
+max_backup_bytes = 33554432
+
+# BOLT12 offer clients pay for storage — e.g. from RLN `/lnoffer`,
+# `lightning-cli offer`, or LDK-node. Empty = demo/mock payments only.
+bolt12_offer = ""
+
+[storage]
+# "memory" (demo) or "vss" (LDK vss-server: https://github.com/lightningdevkit/vss-server)
+backend = "memory"
+vss_url = "http://127.0.0.1:8080/vss"
+store_id = "pivss"
+
+[nostr]
+# hex secret key; generated & persisted to <data_dir>/nostr.key when empty.
+secret_key_hex = ""
+# KaleidoSwap's relay first, plus a public relay for reach. Clients can
+# discover the kind:38831 service announcements here with NDK / nostr-tools.
+relays = ["wss://relay.kaleidoswap.com", "wss://nos.lol"]
+
+[torrent]
+enable = true
+# carl: https://github.com/vincenzopalazzo/carl — when missing, torrents and
+# magnet links are still created under <data_dir>/seeds for out-of-band seeding.
+carl_bin = "carl"
+port = 6881
+trackers = []

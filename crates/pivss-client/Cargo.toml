@@ -1,0 +1,29 @@
+[package]
+name = "pivss-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "pivss_client"
+path = "src/lib.rs"
+
+[[bin]]
+name = "pivss-client"
+path = "src/main.rs"
+
+[dependencies]
+pivss-core.workspace = true
+
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+hex.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+reqwest.workspace = true
+clap.workspace = true
+
+[dev-dependencies]
+pivss-server = { path = "../pivss-server" }
+axum.workspace = true

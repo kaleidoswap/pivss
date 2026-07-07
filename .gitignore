@@ -1,0 +1,6 @@
+/target
+/pivss-data
+/pivss-client-state
+config.toml
+*.torrent
+restored-*

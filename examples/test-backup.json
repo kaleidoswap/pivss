@@ -1,0 +1,37 @@
+{
+  "_comment": "Example test file: a fake Lightning + RGB wallet state snapshot used by the PIVSS demo and e2e tests. A real client would upload an encrypted blob.",
+  "wallet_id": "demo-wallet-01",
+  "snapshot_at": "2026-07-07T12:00:00Z",
+  "lightning": {
+    "node_pubkey": "02deadbeefcafe00112233445566778899aabbccddeeff00112233445566778899",
+    "channels": [
+      {
+        "channel_id": "3f2a9c0000000001",
+        "peer": "0311aa22bb33cc44dd55ee66ff778899aabbccddeeff00112233445566778899aa",
+        "capacity_sat": 1000000,
+        "local_balance_msat": 420000000,
+        "state": "ChannelReady"
+      },
+      {
+        "channel_id": "3f2a9c0000000002",
+        "peer": "03fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+        "capacity_sat": 250000,
+        "local_balance_msat": 21000000,
+        "state": "ChannelReady"
+      }
+    ],
+    "monitors_checksum": "9b1de1b972e0ad0f3b4c8de2b8de1a2c"
+  },
+  "rgb": {
+    "assets": [
+      {
+        "asset_id": "rgb:2dkSTbr-jFPGcPGVpFyx6wyeSmDPqZLdBUBrPBUQ2GLbmhWTw",
+        "ticker": "USDT",
+        "balance": "1250.50",
+        "consignment_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    ],
+    "stash_checksum": "77aa88bb99ccddee00112233aabb4455"
+  },
+  "notes": "Replace this file with your actual (encrypted) node backup — this is only demo payload for the incentivized storage flow."
+}
