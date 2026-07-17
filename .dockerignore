@@ -1,0 +1,15 @@
+target
+pivss-data
+pivss-client-state
+pivss-server-data
+.mainnet-test-data
+.smoke-data*
+.git
+.env
+*.env
+!.env.example
+breez-mnemonic.txt
+breez-wallet
+blog
+*.log
+.DS_Store

@@ -21,6 +21,7 @@ impl IntoResponse for ServiceError {
             ServiceError::NotFound(_) => StatusCode::NOT_FOUND,
             ServiceError::TooLarge(..) => StatusCode::PAYLOAD_TOO_LARGE,
             ServiceError::Store(crate::store::StoreError::Conflict(_)) => StatusCode::CONFLICT,
+            ServiceError::MockPaymentsDisabled => StatusCode::FORBIDDEN,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         };
         (status, Json(json!({ "error": self.to_string() }))).into_response()
@@ -77,6 +78,8 @@ async fn info(State(state): State<Arc<AppState>>) -> Result<impl IntoResponse, S
         "payments_total_msat": payments.iter().map(|p| p.amount_msat).sum::<u64>(),
         "uptime_secs": now_secs().saturating_sub(state.started_at),
         "relays": state.config.nostr.relays,
+        "real_payments": state.ln.is_some(),
+        "lightning_network": state.ln.is_some().then(|| state.config.lightning.network.clone()),
     })))
 }
 
@@ -105,7 +108,7 @@ async fn upload_backup(
             "stored_version": version,
             "seed_status": seed_status,
             "quote_msat": quote_msat,
-            "bolt12_offer": state.config.bolt12_offer,
+            "bolt12_offer": state.announcement().bolt12_offer,
         })),
     ))
 }

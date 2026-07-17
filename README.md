@@ -39,6 +39,11 @@ data.
 4. **Proof OK → client pays** the BOLT12 offer for another billing period
    (`pivss-client watch` automates verify→pay). Proof fails → payment is
    withheld. Storage stays honest because revenue stops the moment data drops.
+   Payment is a **real** BOLT12 payment via an embedded
+   [breez-sdk-liquid](https://github.com/breez/breez-sdk-liquid) wallet on
+   both sides once `lightning.enable = true` (`--real-payment` on the
+   client) — the provider only ever records a payment its own wallet
+   observed, never a client's claim. See [Real integrations](#real-integrations).
 
 ## Trust model
 
@@ -61,11 +66,39 @@ storage) or read it (encryption).
 | crate / dir | what it is |
 |---|---|
 | `crates/pivss-core` | shared primitives: VSS protobuf types (hand-written, `protoc`-free), optional AES-256-GCM/Argon2id encryption envelope, single-file v1 torrent creation + magnet links, proof-of-storage challenges, minimal NIP-01 nostr signing |
-| `crates/pivss-server` | axum server: HTTP API, storage backends (`memory`, `vss`), carl seeder, nostr announcements, embedded web UIs |
+| `crates/pivss-ln` | thin wrapper around `breez-sdk-liquid`: durable BOLT12 offer creation, paying an offer with a payer note, forwarding confirmed incoming payments |
+| `crates/pivss-server` | axum server: HTTP API, storage backends (`memory`, `vss`), carl seeder, nostr announcements, real/mock payments, embedded web UIs |
 | `crates/pivss-client` | API client library + CLI (`backup`, `list`, `restore`, `verify`, `pay`, `watch`) |
 | `examples/test-backup.json` | the demo backup payload used by the e2e test |
 
-## Quick start (demo mode, no external services)
+## Quick start — Docker (recommended, no Rust toolchain needed)
+
+```bash
+docker compose up -d server
+```
+
+That's it — demo mode (memory storage, mock payments), no config, no API key.
+Open **http://localhost:8339/app** in a browser: it's a complete zero-install
+web client — pick a file, upload it, verify proof-of-storage, pay — all from
+the file picker, no CLI required. The **http://localhost:8339/panel** host
+view shows what the server sees (offer, backups, seeding, earnings).
+
+Prefer the CLI, or want to script `watch`? It's dockerized too, no local Rust
+needed — put files to upload in `./uploads/`:
+
+```bash
+docker compose run --rm client backup /uploads/mybackup.json --kind lightning
+docker compose run --rm client list
+docker compose run --rm client verify <backup_id>
+docker compose run --rm client watch <backup_id> --interval 60
+```
+
+For real BOLT12 payments instead of mock, put your
+[Breez API key](https://breez.technology) in `.env` (`cp .env.example .env`),
+set `[lightning] enable = true` + `network = "mainnet"` in
+`config.docker.toml`, then `docker compose up -d server` again.
+
+## Quick start — Cargo (for development)
 
 ```bash
 cargo run -p pivss-server
@@ -91,6 +124,10 @@ cargo run -p pivss-client -- watch <backup_id> --interval 60
 
 # restore any version
 cargo run -p pivss-client -- restore <backup_id> --version 1 -o restored.json
+
+# real payments instead of mock (needs breez-sdk-liquid regtest stack or a
+# mainnet Breez API key — see "Real integrations" below)
+cargo run -p pivss-client -- pay <backup_id> --real-payment --ln-network mainnet
 ```
 
 ## Real integrations
@@ -107,10 +144,26 @@ cargo run -p pivss-client -- restore <backup_id> --version 1 -o restored.json
   Without carl, `.torrent` files + payload are still materialized under
   `<data_dir>/seeds/` (magnet links included), so any client can seed them —
   carl's nostr-based peer discovery pairs nicely with the announcement.
-- **BOLT12** — set `bolt12_offer` to an offer from your node (RLN `/lnoffer`,
-  CLN `offer`, LDK-node). Clients with a real wallet
-  (e.g. [breez-sdk](https://github.com/breez/breez-sdk-liquid), which can pay
-  offers) pay that instead of the mock endpoint.
+- **BOLT12 (real payments)** — set `[lightning] enable = true` in
+  `config.toml`. The server connects a
+  [breez-sdk-liquid](https://github.com/breez/breez-sdk-liquid) wallet,
+  creates a durable BOLT12 offer (replacing the static `bolt12_offer`
+  string in the announcement), and a background task drains its payment
+  event stream: a confirmed incoming payment is correlated to a backup by
+  its **payer note** (the client sets this to the `backup_id`) and only then
+  written as a `PaymentRecord` — the mock endpoint
+  (`POST /backups/{id}/payments`) is disabled while a real wallet is
+  connected, so a client can never simply assert it paid. `network` is
+  `"regtest"` (no API key, but needs a local Breez regtest stack — see
+  [breez-sdk-liquid/regtest](https://github.com/breez/breez-sdk-liquid/tree/main/regtest))
+  or `"mainnet"` (needs a free [Breez API key](https://breez.technology));
+  `"testnet"` is not supported by the underlying SDK. The client pays the
+  same way: `pivss-client pay <id> --real-payment` (or `--network mainnet
+  --ln-api-key ...`) embeds its own separate breez-sdk-liquid wallet,
+  generating and persisting its own mnemonic under `--state-dir`. Without
+  `--real-payment`, the client keeps using the mock endpoint — this is the
+  default and needs no wallet, API key, or regtest stack, which is what
+  keeps the zero-setup demo working.
 - **Nostr** — the server signs a NIP-01 addressable event (kind `38831`) and
   publishes it to the configured relays (default `wss://relay.kaleidoswap.com`
   + `wss://nos.lol`). Clients discover providers and their prices/offers by
@@ -126,7 +179,7 @@ cargo run -p pivss-client -- restore <backup_id> --version 1 -o restored.json
 | `GET /api/v1/backups` / `GET /api/v1/backups/{id}` | list / inspect manifests |
 | `GET /api/v1/backups/{id}/versions/{v}/data` | restore bytes |
 | `POST /api/v1/backups/{id}/challenge` | proof-of-storage challenge |
-| `POST /api/v1/backups/{id}/payments` | record payment (mock today) |
+| `POST /api/v1/backups/{id}/payments` | record a client-asserted payment — **403 whenever a real wallet is connected** (`lightning.enable = true`); demo/CI only |
 | `GET /api/v1/payments` | payments received |
 | `POST /api/v1/announce` (`{"dry_run":true}` to preview) | sign + publish the nostr announcement |
 
@@ -141,13 +194,17 @@ cargo run -p pivss-client -- restore <backup_id> --version 1 -o restored.json
   the 32-byte root instead of the full file.
 - **L402 upload gating** — require a paid L402 macaroon to `POST /backups`,
   so storage is prepaid from the first byte.
-- **BOLT12 payment proofs** — once
+- **Non-repudiable payment proofs** — payments today are real (the
+  provider's own wallet observes them), but that's the provider's word to
+  the client. Once
   [rust-lightning #4297](https://github.com/lightningdevkit/rust-lightning/pull/4297)
-  ships, replace the mock payment endpoint with cryptographic
-  proof-of-payment tied to the offer; the server can then publish payment
-  receipts alongside storage proofs (fully auditable market).
-- **Real wallet in the client** — embed breez-sdk behind a `Payer` trait so
-  `watch` pays the announced offer directly.
+  ships, add cryptographic proof-of-payment tied to the offer so a *third
+  party* — not just the provider — can verify a payment happened, making
+  the whole market auditable.
+- **Stronger payment correlation** — payer-note matching is enough for a
+  small pilot but isn't hardened against a malicious relay/MITM; consider a
+  per-request expected-amount/nonce check before treating a note as
+  authoritative.
 - **Reputation via nostr** — providers accumulate uptime + proof-success
   history under their identity so the market can self-police.
 
@@ -163,4 +220,14 @@ determinism + bencode correctness, proof-of-storage (honest / tampered /
 replayed-nonce / empty file), nostr sign+verify + announcement events, VSS
 versioning semantics (conflicts, `-1` writes), protobuf roundtrips, and a full
 client↔server e2e lifecycle over HTTP (upload → version bump → restore both
-versions → proofs incl. failure cases → payment accounting).
+versions → proofs incl. failure cases → payment accounting). This e2e suite
+runs entirely with `lightning.enable = false` (the default) — no network
+dependency, no API key, no regtest stack.
+
+`pivss-ln` (the breez-sdk-liquid wrapper) has no automated tests: paying and
+receiving only mean something against a live wallet, which needs either a
+Breez API key + mainnet, or a local Breez regtest stack. It's verified by
+type-checking against the pinned SDK version, a clean workspace build, and a
+manual run confirming the server fails fast with a clear error when
+`lightning.enable = true` and no regtest stack is reachable — not yet by an
+end-to-end real payment.

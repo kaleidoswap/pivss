@@ -187,10 +187,14 @@ async function pay(backupId) {
     method: 'POST', headers: {'content-type':'application/json'},
     body: JSON.stringify({ amount_msat: amount, note: 'web client', method: 'mock' })
   });
-  const rec = await resp.json();
+  const body = await resp.json();
   const out = $('verify-out');
   out.hidden = false;
-  out.textContent = `paid ${rec.amount_msat} msat for ${rec.backup_id} (payment ${rec.payment_id}, method ${rec.method})`;
+  if (!resp.ok) {
+    out.textContent = `✘ payment rejected (HTTP ${resp.status}): ${body.error || JSON.stringify(body)}`;
+    return;
+  }
+  out.textContent = `paid ${body.amount_msat} msat for ${body.backup_id} (payment ${body.payment_id}, method ${body.method})`;
 }
 
 refreshService();

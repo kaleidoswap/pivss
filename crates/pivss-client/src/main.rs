@@ -20,6 +20,20 @@ struct Args {
     /// upload (AES-256-GCM / Argon2id) instead of bringing your own ciphertext.
     #[arg(long, env = "PIVSS_PASSPHRASE")]
     passphrase: Option<String>,
+    /// Pay for real via an embedded breez-sdk-liquid wallet instead of the
+    /// server's mock payment endpoint (which a real deployment disables once
+    /// it has a wallet of its own — see `lightning.enable` in config.toml).
+    #[arg(long)]
+    real_payment: bool,
+    /// Network for the embedded client wallet: "regtest" (no API key, but
+    /// needs a local Breez regtest stack) or "mainnet" (needs --ln-api-key).
+    /// Testnet is not supported by breez-sdk-liquid.
+    #[arg(long, default_value = "regtest")]
+    ln_network: String,
+    /// Breez API key, required for --ln-network mainnet. Free key at
+    /// https://breez.technology.
+    #[arg(long, env = "BREEZ_API_KEY")]
+    ln_api_key: Option<String>,
     #[command(subcommand)]
     cmd: Cmd,
 }
@@ -29,6 +43,25 @@ enum KindArg {
     Lightning,
     Rgb,
     Other,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum FundMethodArg {
+    /// On-chain BTC, reverse-swapped into Liquid — fundable from any exchange
+    /// or wallet that sends plain on-chain Bitcoin.
+    Bitcoin,
+    /// Direct L-BTC address — no swap, no swap fee, no minimum, but the
+    /// sender needs Liquid BTC already.
+    Liquid,
+}
+
+impl From<FundMethodArg> for pivss_ln::FundingMethod {
+    fn from(m: FundMethodArg) -> Self {
+        match m {
+            FundMethodArg::Bitcoin => pivss_ln::FundingMethod::BitcoinAddress,
+            FundMethodArg::Liquid => pivss_ln::FundingMethod::LiquidAddress,
+        }
+    }
 }
 
 impl From<KindArg> for BackupKind {
@@ -85,6 +118,18 @@ enum Cmd {
         #[arg(long, default_value = "0")]
         rounds: u64,
     },
+    /// Get a destination to top up THIS client's own embedded wallet (real
+    /// funds — nothing to do with a PIVSS storage payment). Use --ln-network
+    /// to pick mainnet vs regtest.
+    Receive {
+        #[arg(long, value_enum, default_value = "bitcoin")]
+        method: FundMethodArg,
+        /// Request an exact amount instead of a reusable address.
+        #[arg(long)]
+        amount_sat: Option<u64>,
+    },
+    /// Show this client's own embedded wallet balance (real funds).
+    Balance,
 }
 
 fn print_verify(outcome: &VerifyOutcome) {
@@ -126,6 +171,53 @@ fn local_stored_bytes(
     }
 }
 
+/// Fetch the server's current, live BOLT12 offer (not the ledger's cached
+/// copy — a real wallet's offer is authoritative from the server itself).
+async fn get_live_offer(client: &ApiClient) -> anyhow::Result<String> {
+    let info = client.info().await?;
+    info["announcement"]["bolt12_offer"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| anyhow::anyhow!("server has no BOLT12 offer configured"))
+}
+
+/// Connect this client's own embedded wallet (a separate identity from any
+/// provider), generating and persisting a mnemonic under `state_dir` on
+/// first use — protect that file like any wallet seed.
+async fn connect_client_wallet(
+    ln_network: &str,
+    ln_api_key: Option<String>,
+    state_dir: &std::path::Path,
+) -> anyhow::Result<pivss_ln::BreezWallet> {
+    let network = match ln_network.to_ascii_lowercase().as_str() {
+        "regtest" => pivss_ln::LiquidNetwork::Regtest,
+        "mainnet" => pivss_ln::LiquidNetwork::Mainnet,
+        other => anyhow::bail!(
+            "unsupported --ln-network '{other}' (use \"regtest\" or \"mainnet\" — \
+             testnet is not supported by breez-sdk-liquid)"
+        ),
+    };
+    if matches!(network, pivss_ln::LiquidNetwork::Mainnet) && ln_api_key.is_none() {
+        anyhow::bail!("--ln-network mainnet requires --ln-api-key (or BREEZ_API_KEY env)");
+    }
+
+    std::fs::create_dir_all(state_dir)?;
+    let mnemonic_path = state_dir.join("breez-mnemonic.txt");
+    let mnemonic = if mnemonic_path.exists() {
+        std::fs::read_to_string(&mnemonic_path)?.trim().to_string()
+    } else {
+        let m = pivss_ln::generate_mnemonic()?;
+        std::fs::write(&mnemonic_path, &m)?;
+        m
+    };
+
+    let working_dir = state_dir.join("breez-wallet");
+    let (wallet, _incoming) =
+        pivss_ln::BreezWallet::connect(network, ln_api_key, &working_dir, &mnemonic).await?;
+    Ok(wallet)
+}
+
 async fn verify_from_ledger(
     client: &ApiClient,
     ledger: &Ledger,
@@ -142,9 +234,20 @@ async fn verify_from_ledger(
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Load .env (walking up from the current dir) so BREEZ_API_KEY etc. can
+    // be set there instead of the real shell environment. Silently no-op if
+    // there's no .env file — clap's `env = "..."` still works either way.
+    let _ = dotenvy::dotenv();
     let args = Args::parse();
     let client = ApiClient::new(&args.server);
     let mut ledger = Ledger::load(&args.state_dir)?;
+    // Extracted up front: `match args.cmd` below partially moves `args`, so
+    // `&args` (whole-struct borrow) can't be taken afterward — individual
+    // field reads are still fine, only the two `connect_client_wallet` calls
+    // need these.
+    let ln_network = args.ln_network.clone();
+    let ln_api_key = args.ln_api_key.clone();
+    let state_dir = args.state_dir.clone();
     ledger.server = args.server.clone();
 
     match args.cmd {
@@ -283,25 +386,53 @@ async fn main() -> anyhow::Result<()> {
             let amount = amount_msat
                 .or(entry.map(|e| e.quote_msat))
                 .ok_or_else(|| anyhow::anyhow!("no quote known — pass --amount-msat"))?;
-            if let Some(offer) = entry
-                .map(|e| e.bolt12_offer.clone())
-                .filter(|o| !o.is_empty())
-            {
-                println!("BOLT12 offer to pay with a real wallet (e.g. breez-sdk):\n  {offer}");
+
+            if args.real_payment {
+                let offer = get_live_offer(&client).await?;
+                let wallet =
+                    connect_client_wallet(&ln_network, ln_api_key.clone(), &state_dir).await?;
+                let amount_sat = amount.div_ceil(1000).max(1);
+                println!(
+                    "paying BOLT12 offer for {amount_sat} sat (payer_note={backup_id})...\n  {offer}"
+                );
+                let paid = wallet.pay_offer(&offer, amount_sat, &backup_id).await?;
+                println!(
+                    "paid {} sat (fees {} sat){}",
+                    paid.amount_sat,
+                    paid.fees_sat,
+                    paid.preimage
+                        .map(|p| format!(", preimage {p}"))
+                        .unwrap_or_default()
+                );
+            } else {
+                if let Some(offer) = entry
+                    .map(|e| e.bolt12_offer.clone())
+                    .filter(|o| !o.is_empty())
+                {
+                    println!(
+                        "BOLT12 offer to pay for real (pass --real-payment to do so here):\n  {offer}"
+                    );
+                }
+                let rec = client
+                    .pay_mock(&backup_id, amount, Some("pivss-client".into()))
+                    .await?;
+                println!(
+                    "recorded {} payment {} — {} msat for backup {}",
+                    rec.method, rec.payment_id, rec.amount_msat, rec.backup_id
+                );
             }
-            let rec = client
-                .pay_mock(&backup_id, amount, Some("pivss-client".into()))
-                .await?;
-            println!(
-                "recorded {} payment {} — {} msat for backup {}",
-                rec.method, rec.payment_id, rec.amount_msat, rec.backup_id
-            );
         }
         Cmd::Watch {
             backup_id,
             interval,
             rounds,
         } => {
+            let wallet = if args.real_payment {
+                Some(connect_client_wallet(&ln_network, ln_api_key.clone(), &state_dir).await?)
+            } else {
+                None
+            };
+
             let mut round = 0u64;
             loop {
                 round += 1;
@@ -316,18 +447,36 @@ async fn main() -> anyhow::Result<()> {
                 {
                     Ok(outcome) if outcome.ok => {
                         print_verify(&outcome);
-                        let amount = ledger
+                        let amount_msat = ledger
                             .entries
                             .get(&backup_id)
                             .map(|e| e.quote_msat)
                             .unwrap_or(1000);
-                        match client
-                            .pay_mock(&backup_id, amount, Some(format!("round {round}")))
-                            .await
-                        {
-                            Ok(rec) => {
-                                println!("  → paid {} msat ({})", rec.amount_msat, rec.payment_id)
+
+                        let paid: anyhow::Result<String> = if let Some(wallet) = &wallet {
+                            match get_live_offer(&client).await {
+                                Ok(offer) => {
+                                    let amount_sat = amount_msat.div_ceil(1000).max(1);
+                                    wallet.pay_offer(&offer, amount_sat, &backup_id).await.map(
+                                        |p| {
+                                            format!(
+                                                "{} sat (fees {} sat)",
+                                                p.amount_sat, p.fees_sat
+                                            )
+                                        },
+                                    )
+                                }
+                                Err(e) => Err(e),
                             }
+                        } else {
+                            client
+                                .pay_mock(&backup_id, amount_msat, Some(format!("round {round}")))
+                                .await
+                                .map(|rec| format!("{} msat ({})", rec.amount_msat, rec.payment_id))
+                        };
+
+                        match paid {
+                            Ok(msg) => println!("  → paid {msg}"),
                             Err(e) => println!("  → payment failed: {e}"),
                         }
                     }
@@ -342,6 +491,31 @@ async fn main() -> anyhow::Result<()> {
                 }
                 tokio::time::sleep(Duration::from_secs(interval)).await;
             }
+        }
+        Cmd::Receive { method, amount_sat } => {
+            let wallet = connect_client_wallet(&ln_network, ln_api_key.clone(), &state_dir).await?;
+            let info = wallet.funding_address(method.into(), amount_sat).await?;
+            println!(
+                "fund this client's wallet ({ln_network}):\n  {}",
+                info.destination
+            );
+            if let Some(min) = info.min_payer_amount_sat {
+                println!("  min: {min} sat");
+            }
+            if let Some(max) = info.max_payer_amount_sat {
+                println!("  max: {max} sat");
+            }
+            println!("  estimated swap fee: {} sat", info.fees_sat);
+            println!(
+                "\nwallet seed is at {}/breez-mnemonic.txt — this now controls real funds, protect it like any wallet seed.",
+                state_dir.display()
+            );
+        }
+        Cmd::Balance => {
+            let wallet = connect_client_wallet(&ln_network, ln_api_key.clone(), &state_dir).await?;
+            let (confirmed, pending) = wallet.balance().await?;
+            println!("confirmed: {confirmed} sat");
+            println!("pending incoming: {pending} sat");
         }
     }
     Ok(())

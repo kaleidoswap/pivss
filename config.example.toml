@@ -13,8 +13,10 @@ price_sats_per_mib = 21
 billing_period_secs = 86400
 max_backup_bytes = 33554432
 
-# BOLT12 offer clients pay for storage — e.g. from RLN `/lnoffer`,
-# `lightning-cli offer`, or LDK-node. Empty = demo/mock payments only.
+# Static BOLT12 offer string, used ONLY when [lightning] enable = false
+# below (pure demo mode: no wallet, mock payments accepted at face value).
+# Once a real wallet is connected its own live offer is used instead, and
+# this field — along with the mock payment endpoint — is ignored.
 bolt12_offer = ""
 
 [storage]
@@ -37,3 +39,21 @@ enable = true
 carl_bin = "carl"
 port = 6881
 trackers = []
+
+[lightning]
+# When true, the server connects a real breez-sdk-liquid wallet
+# (https://github.com/breez/breez-sdk-liquid), creates a durable BOLT12
+# offer, and only records a payment once the wallet itself observes it —
+# the mock payment endpoint (POST /backups/{id}/payments) is disabled.
+# Default false: pure demo mode, no wallet, no network dependency.
+enable = false
+# "regtest" (no API key, but needs a local Breez regtest stack — see
+# https://github.com/breez/breez-sdk-liquid/tree/main/regtest) or "mainnet"
+# (needs api_key below). "testnet" is not supported by the underlying SDK.
+network = "regtest"
+# Required for network = "mainnet". Free key: https://breez.technology
+api_key = ""
+# BIP39 mnemonic (12 words); generated & persisted to
+# <data_dir>/breez-mnemonic.txt when empty. Controls real funds once
+# network = "mainnet" — protect this file like any wallet seed.
+mnemonic = ""

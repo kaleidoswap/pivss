@@ -4,3 +4,13 @@
 config.toml
 *.torrent
 restored-*
+.env
+*.env
+!.env.example
+breez-mnemonic.txt
+breez-wallet/
+/uploads
+/pivss-server-data
+/.mainnet-test-data
+/.smoke-data*
+.DS_Store

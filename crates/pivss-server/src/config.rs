@@ -14,12 +14,14 @@ pub struct Config {
     pub price_sats_per_mib: u64,
     pub billing_period_secs: u64,
     pub max_backup_bytes: u64,
-    /// BOLT12 offer clients pay for storage (e.g. from RLN `/lnoffer` or any
-    /// node with offer support). The demo works without one.
+    /// Static BOLT12 offer string used only when `lightning.enable = false`
+    /// (pure demo mode, no real wallet). Ignored once a real wallet is
+    /// connected — the live wallet's own offer is used instead.
     pub bolt12_offer: String,
     pub storage: StorageConfig,
     pub nostr: NostrConfig,
     pub torrent: TorrentConfig,
+    pub lightning: LightningConfig,
 }
 
 impl Default for Config {
@@ -37,6 +39,7 @@ impl Default for Config {
             storage: StorageConfig::default(),
             nostr: NostrConfig::default(),
             torrent: TorrentConfig::default(),
+            lightning: LightningConfig::default(),
         }
     }
 }
@@ -97,6 +100,39 @@ impl Default for TorrentConfig {
             carl_bin: "carl".into(),
             port: 6881,
             trackers: vec![],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LightningConfig {
+    /// When false (default) the server runs in demo mode with the static
+    /// `bolt12_offer` string and no real wallet — no dependency on a
+    /// regtest stack or a Breez API key. When true, the server connects a
+    /// real breez-sdk-liquid wallet, creates a durable BOLT12 offer, and
+    /// only records a payment once the wallet actually observes it —
+    /// the mock payment endpoint is disabled while this is on.
+    pub enable: bool,
+    /// "regtest" (no API key needed, requires a local Breez regtest stack —
+    /// see https://github.com/breez/breez-sdk-liquid/tree/main/regtest) or
+    /// "mainnet" (requires `api_key`). "testnet" is not supported by the SDK.
+    pub network: String,
+    /// Required for `network = "mainnet"`. Free key: https://breez.technology
+    pub api_key: String,
+    /// BIP39 mnemonic (12 words); generated and persisted to
+    /// `<data_dir>/breez-mnemonic.txt` when empty. Controls real funds —
+    /// protect this file like any wallet seed.
+    pub mnemonic: String,
+}
+
+impl Default for LightningConfig {
+    fn default() -> Self {
+        Self {
+            enable: false,
+            network: "regtest".into(),
+            api_key: String::new(),
+            mnemonic: String::new(),
         }
     }
 }

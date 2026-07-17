@@ -1,0 +1,34 @@
+services:
+  server:
+    build: .
+    ports:
+      - "8339:8339"
+    volumes:
+      - ./pivss-data:/data
+      - ./config.docker.toml:/config/config.toml:ro
+    environment:
+      # Only used if you flip [lightning] enable=true, network="mainnet" in
+      # config.docker.toml. Put your key in a local .env — never commit it.
+      - BREEZ_API_KEY=${BREEZ_API_KEY:-}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "pivss-server", "--help"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # One-off CLI, e.g.:
+  #   docker compose run --rm client backup /uploads/mybackup.json --kind lightning
+  #   docker compose run --rm client list
+  client:
+    build: .
+    entrypoint: ["pivss-client", "--server", "http://server:8339"]
+    profiles: ["client"]
+    volumes:
+      - ./pivss-client-state:/data/pivss-client-state
+      - ./uploads:/uploads
+    working_dir: /data
+    environment:
+      - BREEZ_API_KEY=${BREEZ_API_KEY:-}
+    depends_on:
+      - server

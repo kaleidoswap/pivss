@@ -3,12 +3,14 @@
 
 use crate::announce::RelayResult;
 use crate::config::Config;
+use crate::ln::LnState;
 use crate::seeder::{SeedStatus, Seeder};
 use crate::store::{StoreError, VersionedStore};
 use pivss_core::manifest::*;
 use pivss_core::nostr::{Event, NostrKeys};
 use pivss_core::proof::{compute_proof, StorageChallenge, StorageProof};
 use pivss_core::torrent::create_torrent;
+use pivss_ln::IncomingPayment;
 use sha2::{Digest, Sha256};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -27,6 +29,10 @@ pub struct AppState {
     pub keys: NostrKeys,
     pub started_at: u64,
     pub last_announcement: Mutex<Option<(Event, Vec<RelayResult>)>>,
+    /// Real BOLT12 wallet, when `lightning.enable = true`. When present, the
+    /// mock payment endpoint is disabled — only payments this wallet itself
+    /// observed are ever recorded.
+    pub ln: Option<LnState>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -37,6 +43,11 @@ pub enum ServiceError {
     NotFound(String),
     #[error("backup too large: {0} bytes (max {1})")]
     TooLarge(u64, u64),
+    #[error(
+        "mock payments are disabled: a real BOLT12 wallet is connected \
+         (lightning.enable = true) — pay the announced offer instead"
+    )]
+    MockPaymentsDisabled,
     #[error("{0}")]
     Internal(String),
 }
@@ -57,11 +68,15 @@ pub fn backup_id(filename: &str, kind: BackupKind) -> String {
 
 impl AppState {
     pub fn announcement(&self) -> ServiceAnnouncement {
+        let bolt12_offer = match &self.ln {
+            Some(ln) => ln.offer.clone(),
+            None => self.config.bolt12_offer.clone(),
+        };
         ServiceAnnouncement {
             name: self.config.name.clone(),
             description: self.config.description.clone(),
             endpoint: self.config.public_endpoint.clone(),
-            bolt12_offer: self.config.bolt12_offer.clone(),
+            bolt12_offer,
             price_sats_per_mib: self.config.price_sats_per_mib,
             billing_period_secs: self.config.billing_period_secs,
             max_backup_bytes: self.config.max_backup_bytes,
@@ -216,6 +231,10 @@ impl AppState {
         Ok((compute_proof(challenge, &data), version))
     }
 
+    /// Record a client-asserted payment. This is trust-on-claim and only
+    /// intended for the offline/CI demo path — refused whenever a real
+    /// wallet is connected, since a real deployment must never let a client
+    /// simply assert it paid.
     pub async fn record_payment(
         &self,
         backup_id: &str,
@@ -223,6 +242,9 @@ impl AppState {
         method: &str,
         note: Option<String>,
     ) -> Result<PaymentRecord, ServiceError> {
+        if self.ln.is_some() {
+            return Err(ServiceError::MockPaymentsDisabled);
+        }
         // Ensure the backup exists.
         self.get_backup(backup_id).await?;
         let payment_id = hex::encode(rand::random::<[u8; 8]>());
@@ -240,6 +262,65 @@ impl AppState {
             .put(&format!("payments/{payment_id}"), 0, bytes)
             .await?;
         Ok(record)
+    }
+
+    /// Record a payment the provider's own wallet actually observed. This is
+    /// the only path that writes a `PaymentRecord` once a real wallet is
+    /// connected — the server never trusts a client's claim.
+    ///
+    /// Correlation is by `payer_note` (the client sets it to the `backup_id`
+    /// it's paying for). A payment with no note, or a note that doesn't match
+    /// a known backup, is logged and dropped rather than recorded blind.
+    pub async fn match_and_record_incoming_payment(&self, payment: IncomingPayment) {
+        let Some(backup_id) = payment.payer_note.clone() else {
+            tracing::warn!(
+                amount_sat = payment.amount_sat,
+                "incoming BOLT12 payment has no payer_note — cannot correlate to a backup, ignoring"
+            );
+            return;
+        };
+        if self.get_backup(&backup_id).await.is_err() {
+            tracing::warn!(
+                backup_id,
+                amount_sat = payment.amount_sat,
+                "incoming BOLT12 payment references an unknown backup_id, ignoring"
+            );
+            return;
+        }
+
+        let amount_msat = payment.amount_sat.saturating_mul(1000);
+        let payment_id = payment
+            .payment_hash
+            .clone()
+            .unwrap_or_else(|| hex::encode(rand::random::<[u8; 8]>()));
+        let record = PaymentRecord {
+            payment_id: payment_id.clone(),
+            backup_id: backup_id.clone(),
+            amount_msat,
+            paid_at: now_secs(),
+            method: "bolt12-breez".to_string(),
+            note: payment.preimage.clone(),
+        };
+
+        let bytes = match serde_json::to_vec(&record) {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::error!(error = %e, "failed to serialize confirmed payment");
+                return;
+            }
+        };
+        match self
+            .store
+            .put(&format!("payments/{payment_id}"), 0, bytes)
+            .await
+        {
+            Ok(_) => tracing::info!(
+                backup_id,
+                amount_sat = payment.amount_sat,
+                "recorded confirmed BOLT12 payment"
+            ),
+            Err(e) => tracing::error!(backup_id, error = %e, "failed to persist confirmed payment"),
+        }
     }
 
     pub async fn list_payments(&self) -> Result<Vec<PaymentRecord>, ServiceError> {

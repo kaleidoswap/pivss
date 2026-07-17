@@ -19,6 +19,10 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Load .env (walking up from the current dir) so BREEZ_API_KEY etc. can
+    // be set there instead of config.toml or the real shell environment.
+    let _ = dotenvy::dotenv();
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),

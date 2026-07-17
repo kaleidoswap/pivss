@@ -8,6 +8,7 @@
 pub mod announce;
 pub mod api;
 pub mod config;
+pub mod ln;
 pub mod seeder;
 pub mod state;
 pub mod store;
@@ -58,12 +59,36 @@ pub async fn build_state(config: Config) -> anyhow::Result<Arc<AppState>> {
         keys
     };
 
-    Ok(Arc::new(AppState {
+    // Real BOLT12 wallet, only when explicitly enabled — the demo path
+    // (static bolt12_offer string, mock payment endpoint) needs neither an
+    // API key nor a regtest stack.
+    let (ln, ln_events) = if config.lightning.enable {
+        let (ln_state, rx) =
+            ln::connect(&config.lightning, &config.data_dir, &config.description).await?;
+        tracing::info!(offer = %ln_state.offer, "connected real BOLT12 wallet");
+        (Some(ln_state), Some(rx))
+    } else {
+        (None, None)
+    };
+
+    let state = Arc::new(AppState {
         config,
         store,
         seeder,
         keys,
         started_at: now_secs(),
         last_announcement: Mutex::new(None),
-    }))
+        ln,
+    });
+
+    if let Some(mut rx) = ln_events {
+        let state = state.clone();
+        tokio::spawn(async move {
+            while let Some(payment) = rx.recv().await {
+                state.match_and_record_incoming_payment(payment).await;
+            }
+        });
+    }
+
+    Ok(state)
 }

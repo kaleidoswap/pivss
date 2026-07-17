@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/pivss-core",
+    "crates/pivss-ln",
     "crates/pivss-server",
     "crates/pivss-client",
 ]
@@ -14,6 +15,9 @@ repository = "https://github.com/kaleidoswap/pivss"
 
 [workspace.dependencies]
 pivss-core = { path = "crates/pivss-core" }
+pivss-ln = { path = "crates/pivss-ln" }
+breez-sdk-liquid = { git = "https://github.com/breez/breez-sdk-liquid", tag = "0.12.4" }
+async-trait = "0.1"
 
 anyhow = "1"
 thiserror = "2"
@@ -36,3 +40,8 @@ clap = { version = "4", features = ["derive", "env"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 toml = "0.8"
+dotenvy = "0.15"
+
+# Required by breez-sdk-liquid (Liquid confidential-transaction crypto).
+[patch.crates-io]
+secp256k1-zkp = { git = "https://github.com/breez/rust-secp256k1-zkp.git", rev = "eac2e479255a6e32b5588bc25ee53c642fdd8395" }

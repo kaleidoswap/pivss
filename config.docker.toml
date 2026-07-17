@@ -1,0 +1,36 @@
+# Config used by docker-compose.yml — mounted read-only into the container
+# at /config/config.toml. Zero-setup defaults: memory storage, no wallet
+# (mock payments), torrent files still created (just not auto-seeded, since
+# carl isn't bundled in the image — see README).
+#
+# listen MUST be 0.0.0.0 inside the container, or the docker port mapping
+# can't reach it.
+
+listen = "0.0.0.0:8339"
+data_dir = "/data"
+name = "pivss-demo"
+description = "P2P incentivized versioned storage for Lightning & RGB backups"
+# Override this to your real reachable host/IP before publishing the nostr
+# announcement for real — it's what clients will try to connect to.
+public_endpoint = "http://127.0.0.1:8339"
+
+price_sats_per_mib = 21
+billing_period_secs = 86400
+max_backup_bytes = 33554432
+
+[storage]
+backend = "memory"
+
+[torrent]
+enable = true
+# carl isn't bundled in the default image (it's a separate Zig binary) —
+# .torrent files + magnet links are still created under /data/seeds for
+# out-of-band seeding. Run carl alongside the container if you want
+# in-process seeding too.
+
+[lightning]
+# Flip to true for real BOLT12 payments (see README "Real payments" section):
+# network = "mainnet" (needs BREEZ_API_KEY) or "regtest" (needs a reachable
+# regtest stack). Mock payments (default) need neither.
+enable = false
+network = "regtest"
