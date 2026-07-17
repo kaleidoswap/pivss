@@ -68,7 +68,7 @@ storage) or read it (encryption).
 | `crates/pivss-core` | shared primitives: VSS protobuf types (hand-written, `protoc`-free), optional AES-256-GCM/Argon2id encryption envelope, single-file v1 torrent creation + magnet links, proof-of-storage challenges, minimal NIP-01 nostr signing |
 | `crates/pivss-ln` | thin wrapper around `breez-sdk-liquid`: durable BOLT12 offer creation, paying an offer with a payer note, forwarding confirmed incoming payments |
 | `crates/pivss-server` | axum server: HTTP API, storage backends (`memory`, `vss`), carl seeder, nostr announcements, real/mock payments, embedded web UIs |
-| `crates/pivss-client` | API client library + CLI (`backup`, `list`, `restore`, `verify`, `pay`, `watch`) |
+| `crates/pivss-client` | API client library + CLI (`backup`, `list`, `restore`, `verify`, `pay`, `watch`, `discover`) |
 | `examples/test-backup.json` | the demo backup payload used by the e2e test |
 
 ## Quick start — Docker (recommended, no Rust toolchain needed)
@@ -79,9 +79,11 @@ docker compose up -d server
 
 That's it — demo mode (memory storage, mock payments), no config, no API key.
 Open **http://localhost:8339/app** in a browser: it's a complete zero-install
-web client — pick a file, upload it, verify proof-of-storage, pay — all from
-the file picker, no CLI required. The **http://localhost:8339/panel** host
-view shows what the server sees (offer, backups, seeding, earnings).
+web client — pick a file, upload it, verify proof-of-storage, pay, and
+**discover other PIVSS providers via nostr** — all from the browser, no CLI
+required. The **http://localhost:8339/panel** host view shows what the
+server sees (offer, backups, seeding, earnings) and publishes its own
+announcement.
 
 Prefer the CLI, or want to script `watch`? It's dockerized too, no local Rust
 needed — put files to upload in `./uploads/`:
@@ -128,6 +130,9 @@ cargo run -p pivss-client -- restore <backup_id> --version 1 -o restored.json
 # real payments instead of mock (needs breez-sdk-liquid regtest stack or a
 # mainnet Breez API key — see "Real integrations" below)
 cargo run -p pivss-client -- pay <backup_id> --real-payment --ln-network mainnet
+
+# find providers by querying nostr for their announcements (signature-verified)
+cargo run -p pivss-client -- discover
 ```
 
 ## Real integrations
