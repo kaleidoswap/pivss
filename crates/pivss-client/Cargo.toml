@@ -25,6 +25,8 @@ tokio.workspace = true
 reqwest.workspace = true
 clap.workspace = true
 dotenvy.workspace = true
+tokio-tungstenite.workspace = true
+futures-util.workspace = true
 
 [dev-dependencies]
 pivss-server = { path = "../pivss-server" }

@@ -5,12 +5,16 @@
 //! verify proof-of-storage challenges against its own copy and decide whether
 //! to release the recurring BOLT12 payment.
 
+pub mod discover;
+
 use pivss_core::manifest::{BackupKind, BackupManifest, PaymentRecord};
 use pivss_core::proof::{make_challenge, verify_proof, StorageChallenge, StorageProof};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+
+pub use discover::{discover_providers, DiscoveredProvider};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LedgerEntry {

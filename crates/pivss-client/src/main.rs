@@ -4,6 +4,10 @@ use pivss_core::manifest::BackupKind;
 use std::path::PathBuf;
 use std::time::Duration;
 
+/// Matches pivss-server's own `[nostr] relays` default — where servers
+/// publish to by default, `discover` looks by default.
+const DEFAULT_DISCOVERY_RELAYS: &[&str] = &["wss://relay.kaleidoswap.com", "wss://nos.lol"];
+
 #[derive(Parser)]
 #[command(name = "pivss-client", about = "Client for a PIVSS backup server")]
 struct Args {
@@ -130,6 +134,18 @@ enum Cmd {
     },
     /// Show this client's own embedded wallet balance (real funds).
     Balance,
+    /// Find PIVSS providers by querying nostr relays for their service
+    /// announcements (kind 38831) — the counterpart to a server's "Publish
+    /// to relays" button. Each result's signature is verified before it's
+    /// shown; point --server at whichever one you want to use.
+    Discover {
+        /// Relays to query (defaults to the same relays PIVSS servers
+        /// publish to by default).
+        #[arg(long)]
+        relay: Vec<String>,
+        #[arg(long, default_value = "5")]
+        timeout_secs: u64,
+    },
 }
 
 fn print_verify(outcome: &VerifyOutcome) {
@@ -516,6 +532,40 @@ async fn main() -> anyhow::Result<()> {
             let (confirmed, pending) = wallet.balance().await?;
             println!("confirmed: {confirmed} sat");
             println!("pending incoming: {pending} sat");
+        }
+        Cmd::Discover {
+            relay,
+            timeout_secs,
+        } => {
+            let relays = if relay.is_empty() {
+                DEFAULT_DISCOVERY_RELAYS
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect()
+            } else {
+                relay
+            };
+            println!("querying {} relay(s)...", relays.len());
+            let providers =
+                pivss_client::discover_providers(&relays, Duration::from_secs(timeout_secs)).await;
+            if providers.is_empty() {
+                println!("no providers found (nothing published, or relays unreachable)");
+                return Ok(());
+            }
+            for p in &providers {
+                let a = &p.announcement;
+                println!(
+                    "{}  {} — {} sats/MiB per {}h, max {} — {}",
+                    p.npub,
+                    a.name,
+                    a.price_sats_per_mib,
+                    a.billing_period_secs / 3600,
+                    a.max_backup_bytes,
+                    a.endpoint,
+                );
+                println!("  bolt12: {}", a.bolt12_offer);
+                println!("  seen on: {}", p.seen_on.join(", "));
+            }
         }
     }
     Ok(())

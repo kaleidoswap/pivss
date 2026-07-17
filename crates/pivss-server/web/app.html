@@ -41,6 +41,21 @@
 </section>
 
 <section>
+  <h2>Discover other providers</h2>
+  <div class="dim" style="margin-bottom:10px">
+    Queries this server's own relays for other PIVSS announcements (nostr kind 38831).
+    Signatures aren't checked here — this is a quick browse, not a trust decision;
+    use <code>pivss-client discover</code> for a signature-verified list.
+  </div>
+  <button id="discover">Discover via nostr</button>
+  <table id="discover-table" hidden>
+    <thead><tr><th>name</th><th>price</th><th>bolt12</th><th>endpoint</th></tr></thead>
+    <tbody id="providers"></tbody>
+  </table>
+  <div id="discover-status" class="dim" style="margin-top:8px"></div>
+</section>
+
+<section>
   <h2>Upload a backup</h2>
   <div class="row">
     <div><label>File</label><input type="file" id="file"></div>
@@ -196,6 +211,71 @@ async function pay(backupId) {
   }
   out.textContent = `paid ${body.amount_msat} msat for ${body.backup_id} (payment ${body.payment_id}, method ${body.method})`;
 }
+
+// Query one relay for kind-38831 events over a plain WebSocket (native, no
+// library) and resolve with whatever arrived before EOSE or the timeout.
+function queryRelay(relay, kinds, timeoutMs) {
+  return new Promise((resolve) => {
+    const events = [];
+    let ws;
+    const finish = () => { try { ws?.close(); } catch {} resolve(events); };
+    const timer = setTimeout(finish, timeoutMs);
+    try {
+      ws = new WebSocket(relay);
+    } catch {
+      clearTimeout(timer);
+      resolve(events);
+      return;
+    }
+    ws.onopen = () => ws.send(JSON.stringify(['REQ', 'pivss-discover', { kinds }]));
+    ws.onmessage = (msg) => {
+      let parsed;
+      try { parsed = JSON.parse(msg.data); } catch { return; }
+      if (parsed[0] === 'EVENT') events.push(parsed[2]);
+      else if (parsed[0] === 'EOSE') { clearTimeout(timer); finish(); }
+    };
+    ws.onerror = () => { clearTimeout(timer); finish(); };
+  });
+}
+
+$('discover').onclick = async () => {
+  const btn = $('discover');
+  const status = $('discover-status');
+  btn.disabled = true;
+  status.textContent = 'querying relays…';
+  try {
+    const info = await (await fetch('/api/v1/info')).json();
+    const relays = info.relays && info.relays.length ? info.relays : ['wss://relay.kaleidoswap.com', 'wss://nos.lol'];
+    const results = await Promise.all(relays.map(r => queryRelay(r, [38831], 5000)));
+    const byPubkey = new Map();
+    for (const events of results) {
+      for (const ev of events) {
+        const existing = byPubkey.get(ev.pubkey);
+        if (!existing || ev.created_at > existing.created_at) byPubkey.set(ev.pubkey, ev);
+      }
+    }
+    const providers = [...byPubkey.values()].map(ev => {
+      try { return { ev, a: JSON.parse(ev.content) }; } catch { return null; }
+    }).filter(Boolean).sort((x, y) => x.a.price_sats_per_mib - y.a.price_sats_per_mib);
+
+    const tbody = $('providers');
+    tbody.replaceChildren();
+    $('discover-table').hidden = providers.length === 0;
+    for (const { a } of providers) {
+      const endpointLink = el('a', '', a.endpoint);
+      endpointLink.href = a.endpoint + '/app';
+      tbody.append(el('tr', '',
+        el('td', '', a.name),
+        el('td', '', `${a.price_sats_per_mib} sats/MiB`),
+        el('td', '', el('code', '', (a.bolt12_offer || '').slice(0, 24) + (a.bolt12_offer ? '…' : '(none)'))),
+        el('td', '', endpointLink),
+      ));
+    }
+    status.textContent = `found ${providers.length} provider(s) across ${relays.length} relay(s)`;
+  } finally {
+    btn.disabled = false;
+  }
+};
 
 refreshService();
 refreshBackups();

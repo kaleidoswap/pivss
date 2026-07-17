@@ -118,6 +118,19 @@ pub fn client_publish_message(ev: &Event) -> String {
     serde_json::to_string(&json!(["EVENT", ev])).expect("serialize event")
 }
 
+/// The relay wire message for a NIP-01 subscription request: `["REQ", sub_id, {...}]`.
+pub fn client_query_message(sub_id: &str, kinds: &[u64]) -> String {
+    serde_json::to_string(&json!(["REQ", sub_id, { "kinds": kinds }])).expect("serialize req")
+}
+
+/// NIP-19 npub encoding of a bare hex public key — for other parties'
+/// pubkeys, where only the public half is ever known (discovery, display).
+pub fn pubkey_hex_to_npub(pubkey_hex: &str) -> anyhow::Result<String> {
+    let bytes = hex::decode(pubkey_hex)?;
+    let hrp = bech32::Hrp::parse("npub")?;
+    Ok(bech32::encode::<bech32::Bech32>(hrp, &bytes)?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -148,5 +161,20 @@ mod tests {
         let keys = NostrKeys::generate();
         let restored = NostrKeys::from_secret_hex(&keys.secret_hex()).unwrap();
         assert_eq!(keys.public_hex(), restored.public_hex());
+    }
+
+    #[test]
+    fn pubkey_npub_matches_keypair_npub() {
+        let keys = NostrKeys::generate();
+        assert_eq!(pubkey_hex_to_npub(&keys.public_hex()).unwrap(), keys.npub());
+    }
+
+    #[test]
+    fn query_message_shape() {
+        let msg = client_query_message("sub1", &[SERVICE_ANNOUNCEMENT_KIND]);
+        let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
+        assert_eq!(parsed[0], "REQ");
+        assert_eq!(parsed[1], "sub1");
+        assert_eq!(parsed[2]["kinds"][0], SERVICE_ANNOUNCEMENT_KIND);
     }
 }
