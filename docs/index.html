@@ -120,7 +120,8 @@
     <p class="lede">
       PIVSS is an incentivized storage market: providers earn sats for holding your
       encrypted wallet state — but only for as long as they can <em>prove</em> it's
-      still there. No trusted single vendor. No blind trust in a payment either.
+      still there. No blind trust in a provider's honesty. No blind trust in a
+      payment either.
     </p>
     <div class="cta">
       <a class="btn primary" href="https://github.com/kaleidoswap/pivss">View on GitHub</a>
@@ -232,9 +233,10 @@
 <span class="prompt">$</span> docker compose up -d server</pre>
     <p style="color:var(--dim)">
       Open <code>http://localhost:8339/app</code> — a complete zero-install web
-      client: pick a file, upload it, verify proof-of-storage, pay, and discover
-      other providers, all from the browser. <code>http://localhost:8339/panel</code>
-      is the provider's own view.
+      client: pick a file, upload it, verify proof-of-storage, pay (mock by
+      default — the CLI's <code>--real-payment</code> is the one that pays for
+      real), and discover other providers, all from the browser.
+      <code>http://localhost:8339/panel</code> is the provider's own view.
     </p>
     <p style="color:var(--dim)">
       Prefer the CLI? It's dockerized too —
@@ -255,11 +257,11 @@
       <div class="status-card">
         <h3><span class="dot ok"></span> Live and verified</h3>
         <ul>
-          <li>Real BOLT12 payments (mainnet + regtest) via breez-sdk-liquid, both sides</li>
+          <li>Real BOLT12 payments on mainnet via breez-sdk-liquid, both sides (regtest is supported in code, not yet run)</li>
           <li>Provider never trusts a client's payment claim — only its own wallet</li>
           <li>Proof-of-storage: honest / tampered / replayed-nonce, all tested</li>
           <li>Client-side encryption, zero-knowledge server</li>
-          <li>Nostr publish <em>and</em> discovery, both signature-verified round-trip</li>
+          <li>Nostr publish + CLI discovery, both signature-verified round-trip (the browser's discovery is an unverified quick-browse, by design)</li>
           <li>Docker Compose — full loop tested end-to-end through containers</li>
         </ul>
       </div>
