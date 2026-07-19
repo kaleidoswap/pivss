@@ -15,9 +15,10 @@
   section h2{font-size:14px;margin-bottom:10px;color:var(--acc)}
   label{display:block;color:var(--dim);font-size:12px;margin:10px 0 4px}
   input,select{background:#0a0d13;border:1px solid var(--line);border-radius:8px;color:var(--text);padding:8px 10px;width:100%;font:inherit}
-  button{background:var(--acc);color:#0b0e14;border:0;border-radius:8px;padding:8px 14px;font-weight:600;cursor:pointer;margin-top:12px}
+  button{background:var(--acc);color:#0b0e14;border:0;border-radius:8px;padding:8px 14px;font-weight:600;cursor:pointer;margin-top:12px;font:inherit}
   button.small{padding:4px 10px;font-size:12px;margin:0}
   button.ghost{background:transparent;color:var(--acc);border:1px solid var(--acc)}
+  button:disabled{opacity:.6;cursor:default}
   table{width:100%;border-collapse:collapse;font-size:13px}
   th{color:var(--dim);text-align:left;font-weight:500;padding:6px 8px;border-bottom:1px solid var(--line)}
   td{padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
@@ -29,6 +30,37 @@
   a{color:var(--acc)}
   .row{display:flex;gap:8px;align-items:end}
   .row > div{flex:1}
+  @media (max-width:560px){.row{flex-wrap:wrap}.row > div{flex:1 1 100%}}
+
+  /* loading spinner, shown inside a button while its action is in flight */
+  .spinner{display:inline-block;width:11px;height:11px;border:2px solid rgba(0,0,0,.3);border-top-color:currentColor;border-radius:50%;animation:spin .6s linear infinite;vertical-align:-1px;margin-right:6px}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  /* inline copy-to-clipboard button, next to any long technical string */
+  .copy{background:transparent;border:1px solid var(--line);color:var(--dim);border-radius:6px;padding:2px 7px;font-size:11px;cursor:pointer;margin:0 0 0 6px;font:inherit;vertical-align:1px}
+  .copy:hover{color:var(--text);border-color:var(--acc)}
+  .copyline{display:flex;align-items:flex-start;gap:4px;flex-wrap:wrap}
+  .copyline code{flex:1;min-width:0}
+
+  /* per-backup status badge: at a glance, is this backup healthy? */
+  .status{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--dim)}
+  .status .dot{width:7px;height:7px;border-radius:50%;background:var(--dim);flex-shrink:0}
+  .status.ok .dot{background:var(--ok)}
+  .status.bad .dot{background:var(--bad)}
+  .status.paid{color:var(--acc)}
+  .status.paid .dot{background:var(--acc)}
+
+  /* verify/pay result card, replacing a flat pre-dump */
+  .result{border-radius:8px;padding:12px 14px;margin-top:10px;border:1px solid var(--line);background:#0a0d13}
+  .result.ok{border-color:var(--ok)}
+  .result.bad{border-color:var(--bad)}
+  .result .headline{font-weight:600;display:flex;align-items:center;gap:8px;font-size:13.5px}
+  .result .headline.ok{color:var(--ok)}
+  .result .headline.bad{color:var(--bad)}
+  .result .sub{color:var(--dim);font-size:12.5px;margin-top:4px}
+  .result details{margin-top:8px;color:var(--dim);font-size:12px}
+  .result details summary{cursor:pointer;color:var(--acc)}
+  .result details pre{margin-top:6px;margin-bottom:0}
 </style>
 </head>
 <body>
@@ -69,7 +101,7 @@
     <div><label>Label</label><input id="label" placeholder="my node backup"></div>
   </div>
   <button id="upload">Upload backup version</button>
-  <pre id="upload-out" hidden></pre>
+  <div id="upload-out"></div>
 </section>
 
 <section>
@@ -83,7 +115,7 @@
     proof against bytes it cannot precompute. <b>Pay</b> records a (mock) payment — with a real wallet
     you would pay the BOLT12 offer instead.
   </div>
-  <pre id="verify-out" hidden></pre>
+  <div id="verify-out"></div>
 </section>
 
 <script>
@@ -97,15 +129,58 @@ function el(tag, className, ...children) {
   return node;
 }
 
-const hexToBytes = h => new Uint8Array(h.match(/../g).map(x => parseInt(x, 16)));
-const bytesToHex = buf => [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2,'0')).join('');
-async function sha256Concat(nonce, data) {
-  const joined = new Uint8Array(nonce.length + data.length);
-  joined.set(nonce); joined.set(data, nonce.length);
-  return bytesToHex(await crypto.subtle.digest('SHA-256', joined));
+function timeAgo(ts) {
+  const s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+  if (s < 60) return 'just now';
+  if (s < 3600) return `${Math.floor(s/60)}m ago`;
+  if (s < 86400) return `${Math.floor(s/3600)}h ago`;
+  return `${Math.floor(s/86400)}d ago`;
+}
+
+// Wrap an async handler so the button shows a spinner + disables itself
+// while in flight — otherwise clicking Verify/Discover/Pay gives zero
+// feedback for the several seconds a real network round-trip takes.
+function withLoading(btn, busyLabel, fn) {
+  return async (...args) => {
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.replaceChildren(el('span', 'spinner'), document.createTextNode(busyLabel));
+    try {
+      return await fn(...args);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = original;
+    }
+  };
+}
+
+// A small "Copy" button next to any long technical string (npub, offers,
+// backup ids, magnet links) — these were previously select-and-copy only.
+function copyBtn(text) {
+  const b = el('button', 'copy', 'Copy');
+  b.type = 'button';
+  b.onclick = async (e) => {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(text);
+      b.textContent = 'Copied';
+    } catch {
+      b.textContent = 'Select & copy';
+    }
+    setTimeout(() => { b.textContent = 'Copy'; }, 1500);
+  };
+  return b;
+}
+function copyLine(text, truncate) {
+  const shown = truncate && text.length > truncate ? text.slice(0, truncate) + '…' : text;
+  return el('div', 'copyline', el('code', '', shown), text ? copyBtn(text) : '');
 }
 
 let quotes = {}; // backup_id -> quote_msat
+// Session-local memory of the last verify/pay outcome per backup, so the
+// table shows current health at a glance instead of only offering buttons.
+let backupStatus = {}; // backup_id -> { verified: bool, verifiedAt, paid: bool, paidAt }
+function status(id) { return backupStatus[id] || {}; }
 
 // Best-effort live BTC/USD rate for display only — never used for anything
 // payment-related. Fails soft: USD annotations just don't show if this
@@ -130,10 +205,10 @@ async function refreshService() {
   const a = info.announcement;
   $('svc-info').replaceChildren(
     el('div', '', `${a.name} — ${a.description}`),
-    el('div', 'dim', `price: ${a.price_sats_per_mib} sats/MiB${fmtUsd(a.price_sats_per_mib)} per ${(a.billing_period_secs/3600).toFixed(0)}h · max ${fmtBytes(a.max_backup_bytes)} · nostr: `),
-    el('code', '', info.npub),
+    el('div', 'dim', `price: ${a.price_sats_per_mib} sats/MiB${fmtUsd(a.price_sats_per_mib)} per ${(a.billing_period_secs/3600).toFixed(0)}h · max ${fmtBytes(a.max_backup_bytes)} · nostr:`),
+    copyLine(info.npub),
     el('div', 'dim', 'BOLT12 offer:'),
-    el('code', '', a.bolt12_offer || '(not configured — mock payments only)'),
+    a.bolt12_offer ? copyLine(a.bolt12_offer, 60) : el('code', '', '(not configured — mock payments only)'),
   );
 }
 
@@ -148,21 +223,49 @@ async function refreshBackups() {
     return;
   }
   for (const b of backups) {
+    const st = status(b.backup_id);
+
     const verifyBtn = el('button', 'small ghost', 'Verify…');
-    verifyBtn.onclick = () => verify(b);
+    const verifyCell = el('td', '', verifyBtn);
+    if (st.verified !== undefined) {
+      const cls = st.verified ? 'status ok' : 'status bad';
+      verifyCell.prepend(el('div', cls,
+        el('span', 'dot'),
+        st.verified ? `OK · ${timeAgo(st.verifiedAt)}` : `failed · ${timeAgo(st.verifiedAt)}`,
+      ));
+    }
+    verifyBtn.onclick = withLoading(verifyBtn, 'Verifying…', () => verify(b));
+
     const payBtn = el('button', 'small', 'Pay');
-    payBtn.onclick = () => pay(b.backup_id);
+    const payCell = el('td', '', payBtn);
+    if (st.paid) {
+      payCell.prepend(el('div', 'status paid', el('span', 'dot'), `paid · ${timeAgo(st.paidAt)}`));
+    }
+    payBtn.onclick = withLoading(payBtn, 'Paying…', () => pay(b.backup_id));
+
     tbody.append(el('tr', '',
       el('td', '', el('code', '', b.backup_id)),
       el('td', '', b.filename, el('br', ''), el('span', 'dim', b.kind)),
       el('td', '', `v${b.latest_version}`),
-      el('td', '', verifyBtn),
-      el('td', '', payBtn),
+      verifyCell,
+      payCell,
     ));
   }
 }
 
-$('upload').onclick = async () => {
+function renderResult(container, ok, headline, subline, details) {
+  const card = el('div', ok ? 'result ok' : 'result bad',
+    el('div', ok ? 'headline ok' : 'headline bad', ok ? '✔' : '✘', headline),
+  );
+  if (subline) card.append(el('div', 'sub', subline));
+  if (details) {
+    const d = el('details', '', el('summary', '', 'Technical details'), el('pre', '', details));
+    card.append(d);
+  }
+  container.replaceChildren(card);
+}
+
+$('upload').onclick = withLoading($('upload'), 'Uploading…', async () => {
   const f = $('file').files[0];
   const out = $('upload-out');
   if (!f) { alert('choose a file first'); return; }
@@ -170,48 +273,67 @@ $('upload').onclick = async () => {
   const params = new URLSearchParams({ filename: f.name, kind: $('kind').value, label: $('label').value });
   const resp = await fetch('/api/v1/backups?' + params, { method: 'POST', body: data });
   const body = await resp.json();
-  out.hidden = false;
-  out.textContent = JSON.stringify(body, null, 2);
+  if (!resp.ok) {
+    renderResult(out, false, 'Upload failed', body.error || `HTTP ${resp.status}`);
+    return;
+  }
+  renderResult(
+    out, true,
+    `Stored ${f.name} as v${body.stored_version.version}`,
+    `${(body.stored_version.size/1024).toFixed(1)} KiB · quote: ${body.quote_msat} msat per billing period`,
+    JSON.stringify(body, null, 2),
+  );
   if (body.manifest) quotes[body.manifest.backup_id] = body.quote_msat;
   refreshBackups();
-};
+});
 
 async function verify(backup) {
   const out = $('verify-out');
-  out.hidden = false;
-  out.textContent = `select your LOCAL copy of ${backup.filename} to verify against…`;
-  const picker = document.createElement('input');
-  picker.type = 'file';
-  picker.onchange = async () => {
-    const data = new Uint8Array(await picker.files[0].arrayBuffer());
-    // fresh challenge: random nonce + 3 random ranges
-    const nonceBytes = crypto.getRandomValues(new Uint8Array(32));
-    const ranges = [];
-    for (let i = 0; i < 3 && data.length > 0; i++) {
-      const length = 1 + Math.floor(Math.random() * Math.min(4096, data.length));
-      const offset = Math.floor(Math.random() * (data.length - length + 1));
-      ranges.push({ offset, length });
-    }
-    const challenge = { nonce: bytesToHex(nonceBytes), ranges };
-    const resp = await fetch(`/api/v1/backups/${backup.backup_id}/challenge`, {
-      method: 'POST', headers: {'content-type':'application/json'},
-      body: JSON.stringify({ challenge })
-    });
-    const { proof, version } = await resp.json();
-    const expectedFull = await sha256Concat(nonceBytes, data);
-    let ok = proof.full_proof === expectedFull;
-    for (let i = 0; i < ranges.length && ok; i++) {
-      const r = ranges[i];
-      const expected = await sha256Concat(nonceBytes, data.slice(r.offset, r.offset + r.length));
-      ok = proof.range_proofs[i] === expected;
-    }
-    out.textContent =
-      (ok ? `✔ proof-of-storage OK for v${version}` : `✘ PROOF FAILED for v${version} — do not pay`) +
-      `\nnonce:       ${challenge.nonce}` +
-      `\nfull proof:  ${proof.full_proof}` +
-      `\nranges:      ${JSON.stringify(ranges)}`;
-  };
-  picker.click();
+  out.replaceChildren(el('div', 'dim', `select your LOCAL copy of ${backup.filename} to verify against…`));
+  const data = await new Promise((resolve) => {
+    const picker = document.createElement('input');
+    picker.type = 'file';
+    picker.onchange = async () => resolve(picker.files[0] ? new Uint8Array(await picker.files[0].arrayBuffer()) : null);
+    picker.click();
+  });
+  if (!data) { out.replaceChildren(); return; }
+
+  // fresh challenge: random nonce + 3 random ranges
+  const nonceBytes = crypto.getRandomValues(new Uint8Array(32));
+  const bytesToHex = buf => [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2,'0')).join('');
+  async function sha256Concat(nonce, d) {
+    const joined = new Uint8Array(nonce.length + d.length);
+    joined.set(nonce); joined.set(d, nonce.length);
+    return bytesToHex(await crypto.subtle.digest('SHA-256', joined));
+  }
+  const ranges = [];
+  for (let i = 0; i < 3 && data.length > 0; i++) {
+    const length = 1 + Math.floor(Math.random() * Math.min(4096, data.length));
+    const offset = Math.floor(Math.random() * (data.length - length + 1));
+    ranges.push({ offset, length });
+  }
+  const challenge = { nonce: bytesToHex(nonceBytes), ranges };
+  const resp = await fetch(`/api/v1/backups/${backup.backup_id}/challenge`, {
+    method: 'POST', headers: {'content-type':'application/json'},
+    body: JSON.stringify({ challenge })
+  });
+  const { proof, version } = await resp.json();
+  const expectedFull = await sha256Concat(nonceBytes, data);
+  let ok = proof.full_proof === expectedFull;
+  for (let i = 0; i < ranges.length && ok; i++) {
+    const r = ranges[i];
+    const expected = await sha256Concat(nonceBytes, data.slice(r.offset, r.offset + r.length));
+    ok = proof.range_proofs[i] === expected;
+  }
+
+  backupStatus[backup.backup_id] = { ...status(backup.backup_id), verified: ok, verifiedAt: Date.now() };
+  renderResult(
+    out, ok,
+    ok ? `Proof-of-storage OK for v${version}` : `PROOF FAILED for v${version} — do not pay`,
+    ok ? 'The server read back exactly the bytes it should have — it still has your data.' : 'The server could not prove it holds your data.',
+    `nonce:       ${challenge.nonce}\nfull proof:  ${proof.full_proof}\nranges:      ${JSON.stringify(ranges)}`,
+  );
+  refreshBackups();
 }
 
 async function pay(backupId) {
@@ -222,12 +344,13 @@ async function pay(backupId) {
   });
   const body = await resp.json();
   const out = $('verify-out');
-  out.hidden = false;
   if (!resp.ok) {
-    out.textContent = `✘ payment rejected (HTTP ${resp.status}): ${body.error || JSON.stringify(body)}`;
+    renderResult(out, false, `Payment rejected (HTTP ${resp.status})`, body.error || JSON.stringify(body));
     return;
   }
-  out.textContent = `paid ${body.amount_msat} msat for ${body.backup_id} (payment ${body.payment_id}, method ${body.method})`;
+  backupStatus[backupId] = { ...status(backupId), paid: true, paidAt: Date.now() };
+  renderResult(out, true, `Paid ${body.amount_msat} msat`, `for ${body.backup_id} · payment ${body.payment_id} · method ${body.method}`);
+  refreshBackups();
 }
 
 // Query one relay for kind-38831 events over a plain WebSocket (native, no
@@ -256,44 +379,38 @@ function queryRelay(relay, kinds, timeoutMs) {
   });
 }
 
-$('discover').onclick = async () => {
-  const btn = $('discover');
+$('discover').onclick = withLoading($('discover'), 'Querying relays…', async () => {
   const status = $('discover-status');
-  btn.disabled = true;
-  status.textContent = 'querying relays…';
-  try {
-    const info = await (await fetch('/api/v1/info')).json();
-    const relays = info.relays && info.relays.length ? info.relays : ['wss://relay.kaleidoswap.com', 'wss://nos.lol'];
-    const results = await Promise.all(relays.map(r => queryRelay(r, [38831], 5000)));
-    const byPubkey = new Map();
-    for (const events of results) {
-      for (const ev of events) {
-        const existing = byPubkey.get(ev.pubkey);
-        if (!existing || ev.created_at > existing.created_at) byPubkey.set(ev.pubkey, ev);
-      }
+  status.textContent = '';
+  const info = await (await fetch('/api/v1/info')).json();
+  const relays = info.relays && info.relays.length ? info.relays : ['wss://relay.kaleidoswap.com', 'wss://nos.lol'];
+  const results = await Promise.all(relays.map(r => queryRelay(r, [38831], 5000)));
+  const byPubkey = new Map();
+  for (const events of results) {
+    for (const ev of events) {
+      const existing = byPubkey.get(ev.pubkey);
+      if (!existing || ev.created_at > existing.created_at) byPubkey.set(ev.pubkey, ev);
     }
-    const providers = [...byPubkey.values()].map(ev => {
-      try { return { ev, a: JSON.parse(ev.content) }; } catch { return null; }
-    }).filter(Boolean).sort((x, y) => x.a.price_sats_per_mib - y.a.price_sats_per_mib);
-
-    const tbody = $('providers');
-    tbody.replaceChildren();
-    $('discover-table').hidden = providers.length === 0;
-    for (const { a } of providers) {
-      const endpointLink = el('a', '', a.endpoint);
-      endpointLink.href = a.endpoint + '/app';
-      tbody.append(el('tr', '',
-        el('td', '', a.name),
-        el('td', '', `${a.price_sats_per_mib} sats/MiB`),
-        el('td', '', el('code', '', (a.bolt12_offer || '').slice(0, 24) + (a.bolt12_offer ? '…' : '(none)'))),
-        el('td', '', endpointLink),
-      ));
-    }
-    status.textContent = `found ${providers.length} provider(s) across ${relays.length} relay(s)`;
-  } finally {
-    btn.disabled = false;
   }
-};
+  const providers = [...byPubkey.values()].map(ev => {
+    try { return { ev, a: JSON.parse(ev.content) }; } catch { return null; }
+  }).filter(Boolean).sort((x, y) => x.a.price_sats_per_mib - y.a.price_sats_per_mib);
+
+  const tbody = $('providers');
+  tbody.replaceChildren();
+  $('discover-table').hidden = providers.length === 0;
+  for (const { a } of providers) {
+    const endpointLink = el('a', '', a.endpoint);
+    endpointLink.href = a.endpoint + '/app';
+    tbody.append(el('tr', '',
+      el('td', '', a.name),
+      el('td', '', `${a.price_sats_per_mib} sats/MiB`),
+      el('td', '', el('code', '', (a.bolt12_offer || '').slice(0, 24) + (a.bolt12_offer ? '…' : '(none)'))),
+      el('td', '', endpointLink),
+    ));
+  }
+  status.textContent = `found ${providers.length} provider(s) across ${relays.length} relay(s)`;
+});
 
 fetchBtcUsd().then(refreshService);
 refreshService();

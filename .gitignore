@@ -14,3 +14,22 @@ breez-wallet/
 /.mainnet-test-data
 /.smoke-data*
 .DS_Store
+
+# Video demo generation working files (heavy, regeneratable from capture.js
+# + narration script — see video/README.md if present). Keep the final .mp4
+# out of git too unless deliberately added for the README/Pages site.
+/video/node_modules
+/video/frames
+/video/audio
+/video/scenes
+/video/*.mp4
+/video/concat.txt
+/video/package-lock.json
+
+# Ad-hoc Playwright verification scripts/screenshots (not the demo video
+# itself) — scratch tooling used while iterating on the web UI, not a
+# tracked deliverable.
+/video/uiux/
+/video/uiux-*.png
+/video/verify_ui.js
+/video/verify_panel_ui.js
