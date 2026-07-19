@@ -9,7 +9,13 @@ description = "P2P incentivized versioned storage for Lightning & RGB backups"
 public_endpoint = "http://127.0.0.1:8339"
 
 # Pricing: sats per stored MiB per billing period.
-price_sats_per_mib = 21
+# Cloud storage cost isn't the binding constraint at these backup sizes (a
+# fraction of a sat/day even on AWS S3). The real floor is what a single
+# BOLT12 payment can actually carry — verified live against a real offer,
+# sends below 21 sats are rejected outright before the wallet even checks
+# its balance. 100 sits ~4.8x above that verified floor: comfortable margin,
+# still well under a cent/day for the payer at current BTC prices.
+price_sats_per_mib = 100
 billing_period_secs = 86400
 max_backup_bytes = 33554432
 

@@ -14,7 +14,9 @@ description = "P2P incentivized versioned storage for Lightning & RGB backups"
 # announcement for real — it's what clients will try to connect to.
 public_endpoint = "http://127.0.0.1:8339"
 
-price_sats_per_mib = 21
+# See config.example.toml for the reasoning (real BOLT12 send floor is 21
+# sats, verified live — 100 leaves ~4.8x margin, still trivial for the payer).
+price_sats_per_mib = 100
 billing_period_secs = 86400
 max_backup_bytes = 33554432
 

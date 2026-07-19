@@ -81,6 +81,24 @@ const fmtSats = msat => (msat/1000).toLocaleString() + ' sats';
 const fmtBytes = b => b > 1048576 ? (b/1048576).toFixed(2)+' MiB' : b > 1024 ? (b/1024).toFixed(1)+' KiB' : b+' B';
 const fmtTime = s => new Date(s*1000).toLocaleString();
 
+// Best-effort live BTC/USD rate for display only — never used for anything
+// payment-related. Fails soft: USD annotations just don't show if this
+// fetch fails (offline, blocked, etc).
+let btcUsd = null;
+async function fetchBtcUsd() {
+  try {
+    const r = await fetch('https://mempool.space/api/v1/prices');
+    const j = await r.json();
+    if (typeof j.USD === 'number') btcUsd = j.USD;
+  } catch {}
+}
+function fmtUsd(sats) {
+  if (!btcUsd || !sats) return '';
+  const usd = (sats / 1e8) * btcUsd;
+  const decimals = usd < 0.01 ? 5 : usd < 1 ? 3 : 2;
+  return `≈$${usd.toFixed(decimals)}`;
+}
+
 // Safe DOM builder: el(tag, className, ...children) — children are nodes or strings (textContent).
 function el(tag, className, ...children) {
   const node = document.createElement(tag);
@@ -110,9 +128,9 @@ async function refresh() {
   const a = info.announcement;
   $('stats').replaceChildren(
     statCard('Service', a.name),
-    statCard('Price', `${a.price_sats_per_mib} sats/MiB`, `per ${(a.billing_period_secs/3600).toFixed(0)}h`),
+    statCard('Price', `${a.price_sats_per_mib} sats/MiB`, `per ${(a.billing_period_secs/3600).toFixed(0)}h` + (fmtUsd(a.price_sats_per_mib) ? ` · ${fmtUsd(a.price_sats_per_mib)}` : '')),
     statCard('Backups', String(info.backups_count), `${fmtBytes(info.stored_bytes)} stored`),
-    statCard('Earnings', fmtSats(info.payments_total_msat), `${info.payments_count} payments`),
+    statCard('Earnings', fmtSats(info.payments_total_msat), `${info.payments_count} payments` + (fmtUsd(info.payments_total_msat/1000) ? ` · ${fmtUsd(info.payments_total_msat/1000)}` : '')),
     statCard('Storage backend', info.storage_backend, `seeder: ${info.seeder}`),
     statCard('Nostr identity', info.npub, '', true),
     statCard('BOLT12 offer', a.bolt12_offer || 'not configured', '', true),
@@ -165,6 +183,7 @@ async function announce(dryRun) {
 $('dryrun').onclick = () => announce(true);
 $('publish').onclick = () => announce(false);
 
+fetchBtcUsd().then(refresh);
 refresh();
 setInterval(refresh, 5000);
 </script>

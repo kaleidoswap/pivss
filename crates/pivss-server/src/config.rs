@@ -11,6 +11,16 @@ pub struct Config {
     /// Public base URL clients should use (goes into the nostr announcement).
     pub public_endpoint: String,
     /// Price per stored MiB per billing period, in sats.
+    ///
+    /// Raw cloud storage cost is not the binding constraint here — at these
+    /// backup sizes it's a fraction of a sat/day (Backblaze B2's $0.005/GB/mo
+    /// works out to ~0.00025 sats/MiB/day at ~$64k/BTC). The real floor is
+    /// the minimum amount a single BOLT12 payment can actually carry: verified
+    /// live against a real offer, sends below 21 sats are rejected outright
+    /// ("Output amount is below minimum 21") before the wallet even checks its
+    /// balance. Default here (100) sits ~4.8x above that verified floor —
+    /// comfortable margin for BTC price moves or fee drift, still trivial for
+    /// the payer (well under a cent/day at current prices).
     pub price_sats_per_mib: u64,
     pub billing_period_secs: u64,
     pub max_backup_bytes: u64,
@@ -32,7 +42,7 @@ impl Default for Config {
             name: "pivss-demo".into(),
             description: "P2P incentivized versioned storage for Lightning & RGB backups".into(),
             public_endpoint: "http://127.0.0.1:8339".into(),
-            price_sats_per_mib: 21,
+            price_sats_per_mib: 100,
             billing_period_secs: 86_400,
             max_backup_bytes: 32 * 1024 * 1024,
             bolt12_offer: String::new(),
