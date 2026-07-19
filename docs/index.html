@@ -5,6 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PIVSS — P2P Incentivized Versioned Storage Service</title>
 <meta name="description" content="Incentivized, provable backups for Lightning and RGB wallet state. Providers get paid in sats — only while they can prove the data is still there.">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+CjxyZWN0IHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgcng9IjUiIGZpbGw9IiMwYjBlMTQiLz4KPHBhdGggZD0iTTEyIDNsNyAzdjVjMCA0LjUtMyA4LTcgOS00LTEtNy00LjUtNy05VjZsNy0zeiIgZmlsbD0iIzVlZWFkNCIvPgo8cGF0aCBkPSJNOSAxMmwyIDIgNC00IiBzdHJva2U9IiMwYjBlMTQiIHN0cm9rZS13aWR0aD0iMS44IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiIGZpbGw9Im5vbmUiLz4KPC9zdmc+Cg==">
+
+<meta property="og:type" content="website">
+<meta property="og:title" content="PIVSS — Never lose your Lightning channels or RGB assets">
+<meta property="og:description" content="Incentivized, provable backups for Lightning and RGB wallet state. Providers get paid in sats — only while they can prove the data is still there.">
+<meta property="og:url" content="https://kaleidoswap.github.io/pivss/">
+<meta property="og:image" content="https://kaleidoswap.github.io/pivss/screenshot-panel.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="PIVSS — Never lose your Lightning channels or RGB assets">
+<meta name="twitter:description" content="Incentivized, provable backups for Lightning and RGB wallet state. Providers get paid in sats — only while they can prove the data is still there.">
+<meta name="twitter:image" content="https://kaleidoswap.github.io/pivss/screenshot-panel.png">
 <style>
   :root{
     --bg:#0b0e14; --card:#131826; --card2:#0f1420; --line:#232b3d;
@@ -103,6 +114,21 @@
   .dot{width:8px; height:8px; border-radius:50%; display:inline-block}
   .dot.ok{background:var(--ok)}
   .dot.warn{background:var(--warn)}
+
+  .shots{display:grid; grid-template-columns:1fr 1fr; gap:20px}
+  @media (max-width:680px){.shots{grid-template-columns:1fr}}
+  .shot{background:var(--card); border:1px solid var(--line); border-radius:12px; overflow:hidden}
+  .shot img{width:100%; display:block; border-bottom:1px solid var(--line)}
+  .shot .cap{padding:12px 16px; font-size:13px; color:var(--dim)}
+  .shot .cap b{color:var(--text)}
+
+  .code-block{position:relative}
+  .copy-btn{
+    position:absolute; top:10px; right:10px; background:var(--card2);
+    color:var(--dim); border:1px solid var(--line); border-radius:6px;
+    padding:5px 10px; font-size:12px; cursor:pointer; font-family:inherit;
+  }
+  .copy-btn:hover{color:var(--text); border-color:var(--acc)}
 
   footer{padding:48px 0 64px; text-align:center; color:var(--dim); font-size:13.5px}
   footer a{color:var(--dim); text-decoration:underline; text-decoration-color:var(--line)}
@@ -212,6 +238,23 @@
   </div>
 </section>
 
+<section id="screenshots">
+  <div class="wrap">
+    <h2>See it running</h2>
+    <p class="section-sub">Not mockups — these are from a provider connected to real Bitcoin mainnet.</p>
+    <div class="shots">
+      <div class="shot">
+        <img src="screenshot-panel.png" alt="PIVSS host panel showing a live mainnet BOLT12 offer, price in sats and USD, and a stored backup" loading="lazy">
+        <div class="cap"><b>Host panel</b> — real BOLT12 offer, live sats/USD price, a stored backup.</div>
+      </div>
+      <div class="shot">
+        <img src="screenshot-verify.png" alt="PIVSS client showing real nostr provider discovery results and a successful proof-of-storage verification" loading="lazy">
+        <div class="cap"><b>Client</b> — providers found live via nostr, and a real proof-of-storage check that passed.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
 <section id="architecture">
   <div class="wrap">
     <h2>Under the hood</h2>
@@ -229,8 +272,11 @@
   <div class="wrap">
     <h2>Try it in one command</h2>
     <p class="section-sub">Docker Compose, zero config, no API key needed for the demo.</p>
-    <pre><span class="comment"># clone, then:</span>
+    <div class="code-block">
+      <button class="copy-btn" id="copy-cmd">Copy</button>
+      <pre id="cmd-text"><span class="comment"># clone, then:</span>
 <span class="prompt">$</span> docker compose up -d server</pre>
+    </div>
     <p style="color:var(--dim)">
       Open <code>http://localhost:8339/app</code> — a complete zero-install web
       client: pick a file, upload it, verify proof-of-storage, pay (mock by
@@ -293,5 +339,19 @@
   </div>
 </footer>
 
+<script>
+  const copyBtn = document.getElementById('copy-cmd');
+  if (copyBtn) {
+    copyBtn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText('docker compose up -d server');
+        copyBtn.textContent = 'Copied!';
+      } catch {
+        copyBtn.textContent = 'Select & copy manually';
+      }
+      setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1800);
+    });
+  }
+</script>
 </body>
 </html>
