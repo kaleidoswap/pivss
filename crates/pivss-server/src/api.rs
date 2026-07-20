@@ -1,7 +1,8 @@
 //! HTTP API + embedded web UI.
 
 use crate::announce::{build_announcement_event, publish};
-use crate::state::{now_secs, AppState, ServiceError};
+use crate::config::MAX_BACKUP_BYTES_CEILING;
+use crate::state::{now_secs, AppState, ServiceError, SettingsPatch};
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::http::StatusCode;
@@ -22,6 +23,8 @@ impl IntoResponse for ServiceError {
             ServiceError::TooLarge(..) => StatusCode::PAYLOAD_TOO_LARGE,
             ServiceError::Store(crate::store::StoreError::Conflict(_)) => StatusCode::CONFLICT,
             ServiceError::MockPaymentsDisabled => StatusCode::FORBIDDEN,
+            ServiceError::InvalidSettings(_) => StatusCode::BAD_REQUEST,
+            ServiceError::NoRealWallet(_) => StatusCode::CONFLICT,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         };
         (status, Json(json!({ "error": self.to_string() }))).into_response()
@@ -29,12 +32,19 @@ impl IntoResponse for ServiceError {
 }
 
 pub fn build_router(state: Arc<AppState>) -> Router {
-    let max_body = state.config.max_backup_bytes as usize + 1024;
+    // Fixed hard ceiling, independent of whatever `max_backup_bytes` happens
+    // to be at startup — that value can now change at runtime via
+    // `/api/v1/settings`, but this tower layer is set once here and can't
+    // itself react to that. The real, current limit is enforced dynamically
+    // inside `store_backup`; this is just an outer abuse ceiling.
+    let max_body = MAX_BACKUP_BYTES_CEILING as usize + 1024;
     Router::new()
         .route("/", get(|| async { Redirect::temporary("/panel") }))
         .route("/panel", get(panel_page))
         .route("/app", get(app_page))
         .route("/api/v1/info", get(info))
+        .route("/api/v1/settings", get(get_settings).patch(update_settings))
+        .route("/api/v1/bolt12/refresh", post(refresh_bolt12))
         .route("/api/v1/backups", get(list_backups).post(upload_backup))
         .route("/api/v1/backups/{id}", get(get_backup))
         .route(
@@ -77,10 +87,49 @@ async fn info(State(state): State<Arc<AppState>>) -> Result<impl IntoResponse, S
         "payments_count": payments.len(),
         "payments_total_msat": payments.iter().map(|p| p.amount_msat).sum::<u64>(),
         "uptime_secs": now_secs().saturating_sub(state.started_at),
-        "relays": state.config.nostr.relays,
+        "relays": state.config.read().unwrap().nostr.relays,
         "real_payments": state.ln.is_some(),
-        "lightning_network": state.ln.is_some().then(|| state.config.lightning.network.clone()),
+        "lightning_network": state
+            .ln
+            .is_some()
+            .then(|| state.config.read().unwrap().lightning.network.clone()),
     })))
+}
+
+async fn get_settings(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    Json(state.settings_view())
+}
+
+async fn update_settings(
+    State(state): State<Arc<AppState>>,
+    Json(patch): Json<SettingsPatch>,
+) -> Result<impl IntoResponse, ServiceError> {
+    let (settings, persisted) = state.apply_settings_patch(patch)?;
+    Ok(Json(json!({
+        "settings": settings,
+        "persisted": persisted,
+        "warning": (!persisted).then_some(
+            "no --config file was loaded at startup — these changes will be lost on restart"
+        ),
+    })))
+}
+
+async fn refresh_bolt12(
+    State(state): State<Arc<AppState>>,
+) -> Result<impl IntoResponse, ServiceError> {
+    let Some(ln) = &state.ln else {
+        return Err(ServiceError::NoRealWallet(
+            "no real wallet is connected (lightning.enable = false) — edit bolt12_offer \
+             directly via PATCH /api/v1/settings instead"
+                .into(),
+        ));
+    };
+    let description = state.config.read().unwrap().description.clone();
+    let (offer, changed) = ln
+        .refresh_offer(&description)
+        .await
+        .map_err(|e| ServiceError::Internal(format!("failed to refresh BOLT12 offer: {e}")))?;
+    Ok(Json(json!({ "bolt12_offer": offer, "changed": changed })))
 }
 
 #[derive(Debug, Deserialize)]
@@ -196,7 +245,8 @@ async fn announce(
     let results = if dry_run {
         vec![]
     } else {
-        publish(&event, &state.config.nostr.relays).await
+        let relays = state.config.read().unwrap().nostr.relays.clone();
+        publish(&event, &relays).await
     };
     *state.last_announcement.lock().unwrap() = Some((event.clone(), results.clone()));
     Ok(Json(json!({

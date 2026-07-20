@@ -1,6 +1,11 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+/// Hard ceiling for `max_backup_bytes`, enforced both by the settings-patch
+/// validator and by the router's body-size layer (which is fixed at startup
+/// and can't itself react to a runtime settings change — see `build_router`).
+pub const MAX_BACKUP_BYTES_CEILING: u64 = 512 * 1024 * 1024;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -156,5 +161,16 @@ impl Config {
             }
             None => Ok(Self::default()),
         }
+    }
+
+    /// Write this config back to `path`, atomically (write to a sibling temp
+    /// file, then rename) so a crash mid-write never leaves a truncated
+    /// config.toml behind.
+    pub fn save(&self, path: &PathBuf) -> anyhow::Result<()> {
+        let raw = toml::to_string_pretty(self)?;
+        let tmp = path.with_extension("toml.tmp");
+        std::fs::write(&tmp, raw)?;
+        std::fs::rename(&tmp, path)?;
+        Ok(())
     }
 }

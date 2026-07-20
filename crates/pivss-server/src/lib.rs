@@ -17,11 +17,19 @@ use config::Config;
 use pivss_core::nostr::NostrKeys;
 use seeder::{CarlSeeder, NoopSeeder, Seeder};
 use state::{now_secs, AppState};
-use std::sync::{Arc, Mutex};
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex, RwLock};
 use store::{MemoryStore, VersionedStore, VssHttpStore};
 
 /// Wire up state from config: storage backend, seeder, nostr identity.
-pub async fn build_state(config: Config) -> anyhow::Result<Arc<AppState>> {
+///
+/// `config_path` is threaded through so `/api/v1/settings` can persist edits
+/// back to disk — when `None` (no `--config` was passed), settings changes
+/// stay in-memory only for the life of the process.
+pub async fn build_state(
+    config: Config,
+    config_path: Option<PathBuf>,
+) -> anyhow::Result<Arc<AppState>> {
     std::fs::create_dir_all(&config.data_dir)?;
 
     let store: Arc<dyn VersionedStore> = match config.storage.backend.as_str() {
@@ -65,14 +73,15 @@ pub async fn build_state(config: Config) -> anyhow::Result<Arc<AppState>> {
     let (ln, ln_events) = if config.lightning.enable {
         let (ln_state, rx) =
             ln::connect(&config.lightning, &config.data_dir, &config.description).await?;
-        tracing::info!(offer = %ln_state.offer, "connected real BOLT12 wallet");
+        tracing::info!(offer = %ln_state.offer(), "connected real BOLT12 wallet");
         (Some(ln_state), Some(rx))
     } else {
         (None, None)
     };
 
     let state = Arc::new(AppState {
-        config,
+        config: RwLock::new(config),
+        config_path,
         store,
         seeder,
         keys,

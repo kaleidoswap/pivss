@@ -36,7 +36,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let listen = config.listen.clone();
-    let state = pivss_server::build_state(config).await?;
+    let state = pivss_server::build_state(config, args.config).await?;
 
     tracing::info!(
         npub = %state.keys.npub(),

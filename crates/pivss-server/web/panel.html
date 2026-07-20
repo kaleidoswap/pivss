@@ -26,6 +26,7 @@
   .dim{color:var(--dim)}
   button{background:var(--acc);color:#04211c;border:0;border-radius:8px;padding:8px 14px;font-weight:600;cursor:pointer;font:inherit}
   button.ghost{background:transparent;color:var(--acc);border:1px solid var(--acc)}
+  button.small{padding:4px 10px;font-size:12px}
   button:disabled{opacity:.5;cursor:default}
   pre{background:#0a0d13;border:1px solid var(--line);border-radius:8px;padding:10px;font-size:11px;overflow:auto;max-height:260px;margin-top:10px}
   .pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11px;border:1px solid var(--line)}
@@ -33,6 +34,35 @@
   .pill.warn{color:var(--warn);border-color:var(--warn)}
   a{color:var(--acc)}
   .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+
+  /* Settings form */
+  label{display:block;color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.04em;margin-bottom:5px}
+  input,select,textarea{background:#0a0d13;border:1px solid var(--line);border-radius:8px;color:var(--text);padding:8px 10px;font:inherit;width:100%}
+  textarea{resize:vertical;font-family:inherit}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--acc)}
+  .settings-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px 16px}
+  @media (max-width:640px){.settings-grid{grid-template-columns:1fr}}
+  .field.full{grid-column:1/-1}
+  .field .row{margin-top:0}
+  .field .row select{width:auto;flex-shrink:0}
+  .chip-list{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
+  .chip-list:empty{margin-bottom:0}
+  .chip{display:inline-flex;align-items:center;gap:6px;background:#0a0d13;border:1px solid var(--line);border-radius:999px;padding:4px 6px 4px 12px;font-size:12px;font-family:ui-monospace,monospace;color:var(--dim)}
+  .chip button{background:transparent;border:0;color:var(--dim);padding:0 4px;font-weight:700;cursor:pointer;margin:0;line-height:1;border-radius:50%}
+  .chip button:hover{color:var(--bad)}
+  .warn-banner{color:var(--warn);font-size:12.5px;margin-bottom:12px;display:flex;gap:6px;align-items:center}
+
+  /* verify/pay-style result card, reused here for settings save + bolt12 refresh */
+  .result{border-radius:8px;padding:12px 14px;margin-top:12px;border:1px solid var(--line);background:#0a0d13}
+  .result.ok{border-color:var(--ok)}
+  .result.bad{border-color:var(--bad)}
+  .result .headline{font-weight:600;display:flex;align-items:center;gap:8px;font-size:13.5px}
+  .result .headline.ok{color:var(--ok)}
+  .result .headline.bad{color:var(--bad)}
+  .result .sub{color:var(--dim);font-size:12.5px;margin-top:4px}
+  .result details{margin-top:8px;color:var(--dim);font-size:12px}
+  .result details summary{cursor:pointer;color:var(--acc)}
+  .result details pre{margin-top:6px;margin-bottom:0}
 
   /* loading spinner, shown inside a button while its action is in flight */
   .spinner{display:inline-block;width:11px;height:11px;border:2px solid rgba(0,0,0,.3);border-top-color:currentColor;border-radius:50%;animation:spin .6s linear infinite;vertical-align:-1px;margin-right:6px}
@@ -58,6 +88,66 @@
 <div class="sub">P2P Incentivized Versioned Storage Service — VSS + BitTorrent + BOLT12 + nostr &nbsp;·&nbsp; <a href="/app">client app →</a></div>
 
 <div class="grid" id="stats"></div>
+
+<section id="settings">
+  <h2>Settings</h2>
+  <div id="settings-warn"></div>
+  <div class="settings-grid">
+    <div class="field">
+      <label>Service name</label>
+      <input id="set-name" maxlength="100">
+    </div>
+    <div class="field">
+      <label>Price</label>
+      <div class="row">
+        <input type="number" id="set-price" min="1" style="flex:1">
+        <span class="dim" style="font-size:12px">sats/MiB</span>
+      </div>
+    </div>
+    <div class="field full">
+      <label>Description</label>
+      <textarea id="set-desc" rows="2" maxlength="500"></textarea>
+    </div>
+    <div class="field">
+      <label>Billing period</label>
+      <select id="set-period">
+        <option value="3600">1 hour</option>
+        <option value="21600">6 hours</option>
+        <option value="86400">24 hours</option>
+        <option value="604800">7 days</option>
+        <option value="2592000">30 days</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Max backup size</label>
+      <div class="row">
+        <input type="number" id="set-maxsize-val" min="1" style="flex:1">
+        <select id="set-maxsize-unit">
+          <option value="1024">KiB</option>
+          <option value="1048576">MiB</option>
+          <option value="1073741824">GiB</option>
+        </select>
+      </div>
+    </div>
+    <div class="field full">
+      <label>Relays</label>
+      <div id="set-relays" class="chip-list"></div>
+      <div class="row">
+        <input id="set-relay-new" placeholder="wss://relay.example.com" style="flex:1">
+        <button type="button" id="set-relay-add" class="ghost small">Add relay</button>
+      </div>
+    </div>
+    <div class="field full">
+      <label>BOLT12 offer</label>
+      <div id="set-bolt12"></div>
+    </div>
+  </div>
+  <div class="row" style="margin-top:16px">
+    <button id="set-save" disabled>Save changes</button>
+    <button id="set-discard" class="ghost" disabled>Discard</button>
+  </div>
+  <div id="settings-out"></div>
+</section>
 
 <section>
   <h2>Service announcement (nostr)</h2>
@@ -182,6 +272,208 @@ function withLoading(btn, busyLabel, fn) {
   };
 }
 
+function renderResult(container, ok, headline, subline, details) {
+  const card = el('div', ok ? 'result ok' : 'result bad',
+    el('div', ok ? 'headline ok' : 'headline bad', ok ? '✔' : '✘', headline),
+  );
+  if (subline) card.append(el('div', 'sub', subline));
+  if (details) {
+    const d = el('details', '', el('summary', '', 'Technical details'), el('pre', '', details));
+    card.append(d);
+  }
+  container.replaceChildren(card);
+}
+
+// ---- Settings form ----
+// `originalSettings` is the last known server state (used as the diff base
+// when saving, and to restore on Discard). `draftRelays` is the working copy
+// of the relay list, since chip add/remove doesn't map to a single <input>.
+let originalSettings = null;
+let draftRelays = [];
+
+function markDirty() {
+  $('set-save').disabled = false;
+  $('set-discard').disabled = false;
+}
+
+// Pick whichever unit divides the byte count evenly, biggest first, so
+// "32 MiB" shows as "32 MiB" rather than "33554432" or "32768 KiB".
+function bytesToUnit(bytes) {
+  if (bytes > 0 && bytes % 1073741824 === 0) return { val: bytes / 1073741824, unit: 1073741824 };
+  if (bytes > 0 && bytes % 1048576 === 0) return { val: bytes / 1048576, unit: 1048576 };
+  return { val: Math.max(1, Math.round(bytes / 1024)), unit: 1024 };
+}
+
+function renderRelayChips() {
+  const wrap = $('set-relays');
+  wrap.replaceChildren();
+  for (const r of draftRelays) {
+    const removeBtn = el('button', '', '×');
+    removeBtn.type = 'button';
+    removeBtn.title = `remove ${r}`;
+    removeBtn.onclick = () => {
+      draftRelays = draftRelays.filter((x) => x !== r);
+      renderRelayChips();
+      markDirty();
+    };
+    wrap.append(el('span', 'chip', el('span', '', r), removeBtn));
+  }
+}
+
+async function doRefreshBolt12() {
+  const out = $('settings-out');
+  const resp = await fetch('/api/v1/bolt12/refresh', { method: 'POST' });
+  const body = await resp.json();
+  if (!resp.ok) {
+    renderResult(out, false, 'Could not refresh BOLT12 offer', body.error || `HTTP ${resp.status}`);
+    return;
+  }
+  renderResult(
+    out, true,
+    body.changed ? 'Got a new BOLT12 offer' : 'Offer unchanged',
+    body.changed
+      ? 'The wallet returned a different offer than before.'
+      : 'BOLT12 offers are durable by design — the wallet returned the same one, which is expected.',
+    body.bolt12_offer,
+  );
+  originalSettings.bolt12_offer = body.bolt12_offer;
+  renderBolt12Field(originalSettings);
+}
+
+function renderBolt12Field(s) {
+  const box = $('set-bolt12');
+  box.replaceChildren();
+  if (s.bolt12_editable) {
+    const input = el('input', '');
+    input.id = 'set-bolt12-input';
+    input.value = s.bolt12_offer;
+    input.placeholder = 'demo mode — any placeholder string';
+    input.oninput = markDirty;
+    box.append(input, el('div', 'dim', 'Demo mode: a plain string, not a real payable offer.'));
+  } else {
+    const refreshBtn = el('button', 'ghost small', 'Refresh offer');
+    refreshBtn.type = 'button';
+    refreshBtn.style.marginTop = '8px';
+    refreshBtn.onclick = withLoading(refreshBtn, 'Refreshing…', doRefreshBolt12);
+    box.append(
+      copyableValue(s.bolt12_offer, 60),
+      el('div', 'dim', 'Managed by the connected wallet — refreshing usually returns the same durable offer.'),
+      refreshBtn,
+    );
+  }
+}
+
+function applySettingsToForm(s) {
+  $('set-name').value = s.name;
+  $('set-desc').value = s.description;
+  $('set-price').value = s.price_sats_per_mib;
+
+  const periodSelect = $('set-period');
+  const known = [...periodSelect.options].some((o) => Number(o.value) === s.billing_period_secs);
+  if (!known) {
+    const opt = el('option', '', `${s.billing_period_secs}s (current)`);
+    opt.value = String(s.billing_period_secs);
+    periodSelect.append(opt);
+  }
+  periodSelect.value = String(s.billing_period_secs);
+
+  const { val, unit } = bytesToUnit(s.max_backup_bytes);
+  $('set-maxsize-val').value = val;
+  $('set-maxsize-unit').value = String(unit);
+
+  draftRelays = [...s.relays];
+  renderRelayChips();
+  renderBolt12Field(s);
+}
+
+async function loadSettings() {
+  const s = await (await fetch('/api/v1/settings')).json();
+  originalSettings = s;
+  applySettingsToForm(s);
+  $('set-save').disabled = true;
+  $('set-discard').disabled = true;
+  $('settings-warn').replaceChildren();
+  if (!s.config_persisted) {
+    $('settings-warn').append(
+      el('div', 'warn-banner', '⚠', 'No --config file was loaded at startup — changes here will be lost on restart.'),
+    );
+  }
+}
+
+for (const id of ['set-name', 'set-desc', 'set-price']) $(id).oninput = markDirty;
+for (const id of ['set-period', 'set-maxsize-unit']) $(id).onchange = markDirty;
+$('set-maxsize-val').oninput = markDirty;
+
+$('set-relay-add').onclick = () => {
+  const input = $('set-relay-new');
+  const val = input.value.trim();
+  if (!val) return;
+  if (!val.startsWith('ws://') && !val.startsWith('wss://')) {
+    renderResult($('settings-out'), false, 'Invalid relay URL', 'Relay URLs must start with ws:// or wss://');
+    return;
+  }
+  if (!draftRelays.includes(val)) draftRelays.push(val);
+  input.value = '';
+  renderRelayChips();
+  markDirty();
+};
+
+const setSaveBtn = $('set-save');
+setSaveBtn.onclick = withLoading(setSaveBtn, 'Saving…', async () => {
+  const patch = {};
+  const name = $('set-name').value.trim();
+  if (name !== originalSettings.name) patch.name = name;
+  const desc = $('set-desc').value.trim();
+  if (desc !== originalSettings.description) patch.description = desc;
+  const price = Number($('set-price').value);
+  if (price !== originalSettings.price_sats_per_mib) patch.price_sats_per_mib = price;
+  const period = Number($('set-period').value);
+  if (period !== originalSettings.billing_period_secs) patch.billing_period_secs = period;
+  const maxBytes = Math.round(Number($('set-maxsize-val').value) * Number($('set-maxsize-unit').value));
+  if (maxBytes !== originalSettings.max_backup_bytes) patch.max_backup_bytes = maxBytes;
+  if (JSON.stringify(draftRelays) !== JSON.stringify(originalSettings.relays)) patch.relays = draftRelays;
+  if (originalSettings.bolt12_editable) {
+    const bolt12Input = $('set-bolt12-input');
+    if (bolt12Input && bolt12Input.value !== originalSettings.bolt12_offer) {
+      patch.bolt12_offer = bolt12Input.value;
+    }
+  }
+
+  const out = $('settings-out');
+  if (Object.keys(patch).length === 0) {
+    renderResult(out, true, 'Nothing to save', 'No fields were changed.');
+    return;
+  }
+
+  const resp = await fetch('/api/v1/settings', {
+    method: 'PATCH', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+  const body = await resp.json();
+  if (!resp.ok) {
+    renderResult(out, false, 'Save failed', body.error || `HTTP ${resp.status}`);
+    return;
+  }
+  originalSettings = body.settings;
+  applySettingsToForm(originalSettings);
+  $('set-save').disabled = true;
+  $('set-discard').disabled = true;
+  renderResult(
+    out, true,
+    'Settings saved',
+    body.persisted ? 'Written to config.toml — will survive a restart.' : body.warning,
+    JSON.stringify(body.settings, null, 2),
+  );
+  refresh();
+});
+
+$('set-discard').onclick = () => {
+  applySettingsToForm(originalSettings);
+  $('set-save').disabled = true;
+  $('set-discard').disabled = true;
+  $('settings-out').replaceChildren();
+};
+
 async function refresh() {
   const info = await (await fetch('/api/v1/info')).json();
   const a = info.announcement;
@@ -286,6 +578,7 @@ publishBtn.onclick = withLoading(publishBtn, 'Publishing…', async () => {
 
 fetchBtcUsd().then(refresh);
 refresh();
+loadSettings();
 setInterval(refresh, 5000);
 </script>
 </body>

@@ -61,6 +61,23 @@
   .result details{margin-top:8px;color:var(--dim);font-size:12px}
   .result details summary{cursor:pointer;color:var(--acc)}
   .result details pre{margin-top:6px;margin-bottom:0}
+
+  /* multi-provider selection: chips + per-target upload result rows */
+  .chip{display:inline-flex;align-items:center;gap:6px;background:#0a0d13;border:1px solid var(--line);border-radius:999px;padding:4px 6px 4px 12px;font-size:12px}
+  .chip.pinned{color:var(--dim)}
+  .chip button{background:transparent;border:0;color:var(--dim);padding:0 4px;font-weight:700;cursor:pointer;margin:0;line-height:1;border-radius:50%}
+  .chip button:hover{color:var(--bad)}
+  .chip-list{display:flex;flex-wrap:wrap;gap:6px}
+  .target-result{display:flex;align-items:center;gap:8px;padding:5px 0;font-size:12.5px;border-bottom:1px solid var(--line)}
+  .target-result:last-child{border-bottom:none}
+  .target-result .dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+  .target-result.ok .dot{background:var(--ok)}
+  .target-result.bad .dot{background:var(--bad)}
+  .target-result .detail{color:var(--dim)}
+  .also-on{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px}
+  .also-on-item{display:inline-flex;align-items:center;gap:5px}
+  .also-on-item .chip{padding:2px 8px;font-size:11px}
+  .also-on-item button.small{margin:0;padding:2px 7px;font-size:10.5px}
 </style>
 </head>
 <body>
@@ -81,7 +98,7 @@
   </div>
   <button id="discover">Discover via nostr</button>
   <table id="discover-table" hidden>
-    <thead><tr><th>name</th><th>price</th><th>bolt12</th><th>endpoint</th></tr></thead>
+    <thead><tr><th></th><th>name</th><th>price</th><th>bolt12</th><th>endpoint</th></tr></thead>
     <tbody id="providers"></tbody>
   </table>
   <div id="discover-status" class="dim" style="margin-top:8px"></div>
@@ -100,6 +117,13 @@
     </div>
     <div><label>Label</label><input id="label" placeholder="my node backup"></div>
   </div>
+  <label style="margin-top:14px">Upload to</label>
+  <div id="upload-targets" class="chip-list"></div>
+  <div class="dim" style="margin-top:6px;font-size:12.5px">
+    Check providers in <b>Discover</b> above to also upload there — the same bytes go to every
+    checked provider, each recorded under its own backup_id (deterministic from filename+kind, so
+    it lines up across providers automatically).
+  </div>
   <button id="upload">Upload backup version</button>
   <div id="upload-out"></div>
 </section>
@@ -107,7 +131,7 @@
 <section>
   <h2>Backups on this server</h2>
   <table>
-    <thead><tr><th>id</th><th>file</th><th>latest</th><th>proof-of-storage</th><th>payment</th></tr></thead>
+    <thead><tr><th>id</th><th>file</th><th>latest</th><th>also stored on</th><th>proof-of-storage</th><th>payment</th></tr></thead>
     <tbody id="backups"></tbody>
   </table>
   <div class="dim" style="margin-top:8px">
@@ -182,6 +206,44 @@ let quotes = {}; // backup_id -> quote_msat
 let backupStatus = {}; // backup_id -> { verified: bool, verifiedAt, paid: bool, paidAt }
 function status(id) { return backupStatus[id] || {}; }
 
+// ---- Multi-provider upload ----
+// `selectedProviders` (endpoint -> {endpoint, name}) is which OTHER discovered
+// providers the next upload should also go to, alongside this server —
+// remembered across visits since picking your storage set isn't a one-off
+// decision. `backupProviders` (backup_id -> [{endpoint, name}]) is which
+// providers a given backup actually got uploaded to, purely as a local
+// convenience note ("remembered on this device") — there's no central
+// registry, each provider only knows about its own copy.
+function loadJson(key, fallback) {
+  try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; }
+}
+let selectedProviders = new Map(Object.entries(loadJson('pivss_selected_providers', {})));
+let backupProviders = loadJson('pivss_backup_providers', {});
+function saveSelectedProviders() {
+  localStorage.setItem('pivss_selected_providers', JSON.stringify(Object.fromEntries(selectedProviders)));
+}
+function saveBackupProviders() {
+  localStorage.setItem('pivss_backup_providers', JSON.stringify(backupProviders));
+}
+
+function renderUploadTargets() {
+  const wrap = $('upload-targets');
+  wrap.replaceChildren(el('span', 'chip pinned', 'This server'));
+  for (const p of selectedProviders.values()) {
+    const removeBtn = el('button', '', '×');
+    removeBtn.type = 'button';
+    removeBtn.title = `don't upload to ${p.name}`;
+    removeBtn.onclick = () => {
+      selectedProviders.delete(p.endpoint);
+      saveSelectedProviders();
+      renderUploadTargets();
+      const cb = document.querySelector(`input[data-provider-endpoint="${CSS.escape(p.endpoint)}"]`);
+      if (cb) cb.checked = false;
+    };
+    wrap.append(el('span', 'chip', p.name, removeBtn));
+  }
+}
+
 // Best-effort live BTC/USD rate for display only — never used for anything
 // payment-related. Fails soft: USD annotations just don't show if this
 // fetch fails (offline, blocked, etc).
@@ -218,7 +280,7 @@ async function refreshBackups() {
   tbody.replaceChildren();
   if (!backups.length) {
     const td = el('td', 'dim', 'no backups yet — upload one above');
-    td.colSpan = 5;
+    td.colSpan = 6;
     tbody.append(el('tr', '', td));
     return;
   }
@@ -243,10 +305,25 @@ async function refreshBackups() {
     }
     payBtn.onclick = withLoading(payBtn, 'Paying…', () => pay(b.backup_id));
 
+    const alsoOnCell = el('td', '');
+    const others = backupProviders[b.backup_id] || [];
+    if (!others.length) {
+      alsoOnCell.append(el('span', 'dim', '—'));
+    } else {
+      const list = el('div', 'also-on');
+      for (const p of others) {
+        const vBtn = el('button', 'small ghost', 'Verify');
+        vBtn.onclick = withLoading(vBtn, '…', () => verify(b, p));
+        list.append(el('span', 'also-on-item', el('span', 'chip pinned', p.name), vBtn));
+      }
+      alsoOnCell.append(list);
+    }
+
     tbody.append(el('tr', '',
       el('td', '', el('code', '', b.backup_id)),
       el('td', '', b.filename, el('br', ''), el('span', 'dim', b.kind)),
       el('td', '', `v${b.latest_version}`),
+      alsoOnCell,
       verifyCell,
       payCell,
     ));
@@ -265,29 +342,82 @@ function renderResult(container, ok, headline, subline, details) {
   container.replaceChildren(card);
 }
 
+// Upload the same bytes to one target (this server when `base` is '', or an
+// absolute discovered-provider endpoint otherwise) and normalize the result.
+async function uploadTo(base, name, params, data) {
+  try {
+    const resp = await fetch(`${base}/api/v1/backups?${params}`, { method: 'POST', body: data });
+    const body = await resp.json().catch(() => ({}));
+    return { name, endpoint: base, ok: resp.ok, status: resp.status, body };
+  } catch (e) {
+    return { name, endpoint: base, ok: false, status: 0, body: { error: String(e) } };
+  }
+}
+
+function renderTargetResults(container, results) {
+  for (const r of results) {
+    container.append(el('div', r.ok ? 'target-result ok' : 'target-result bad',
+      el('span', 'dot'),
+      el('span', '', r.name),
+      el('span', 'detail', r.ok
+        ? `stored as v${r.body.stored_version?.version ?? '?'}`
+        : (r.body.error || `HTTP ${r.status}`)),
+    ));
+  }
+}
+
 $('upload').onclick = withLoading($('upload'), 'Uploading…', async () => {
   const f = $('file').files[0];
   const out = $('upload-out');
   if (!f) { alert('choose a file first'); return; }
   const data = new Uint8Array(await f.arrayBuffer());
   const params = new URLSearchParams({ filename: f.name, kind: $('kind').value, label: $('label').value });
-  const resp = await fetch('/api/v1/backups?' + params, { method: 'POST', body: data });
-  const body = await resp.json();
-  if (!resp.ok) {
-    renderResult(out, false, 'Upload failed', body.error || `HTTP ${resp.status}`);
+
+  const others = [...selectedProviders.values()];
+  const [primary, ...rest] = await Promise.all([
+    uploadTo('', 'This server', params, data),
+    ...others.map((p) => uploadTo(p.endpoint, p.name, params, data)),
+  ]);
+
+  if (!primary.ok) {
+    renderResult(out, false, 'Upload failed', primary.body.error || `HTTP ${primary.status}`);
     return;
   }
-  renderResult(
-    out, true,
-    `Stored ${f.name} as v${body.stored_version.version}`,
-    `${(body.stored_version.size/1024).toFixed(1)} KiB · quote: ${body.quote_msat} msat per billing period`,
-    JSON.stringify(body, null, 2),
+
+  const allResults = [primary, ...rest];
+  const okCount = allResults.filter((r) => r.ok).length;
+  const headline = others.length
+    ? `Stored ${f.name} on ${okCount}/${allResults.length} provider(s)`
+    : `Stored ${f.name} as v${primary.body.stored_version.version}`;
+  out.replaceChildren();
+  const card = el('div', okCount === allResults.length ? 'result ok' : 'result bad',
+    el('div', okCount === allResults.length ? 'headline ok' : 'headline bad',
+      okCount === allResults.length ? '✔' : '✘', headline),
   );
-  if (body.manifest) quotes[body.manifest.backup_id] = body.quote_msat;
+  if (others.length) {
+    const list = el('div', '');
+    renderTargetResults(list, allResults);
+    card.append(list);
+  } else {
+    card.append(el('div', 'sub', `${(primary.body.stored_version.size/1024).toFixed(1)} KiB · quote: ${primary.body.quote_msat} msat per billing period`));
+  }
+  out.append(card);
+
+  const backupId = primary.body.manifest?.backup_id;
+  if (backupId) {
+    quotes[backupId] = primary.body.quote_msat;
+    const okOthers = rest.filter((r) => r.ok).map((r) => ({ endpoint: r.endpoint, name: r.name }));
+    if (okOthers.length) {
+      backupProviders[backupId] = okOthers;
+      saveBackupProviders();
+    }
+  }
   refreshBackups();
 });
 
-async function verify(backup) {
+async function verify(backup, target) {
+  const base = target ? target.endpoint : '';
+  const targetLabel = target ? ` on ${target.name}` : '';
   const out = $('verify-out');
   out.replaceChildren(el('div', 'dim', `select your LOCAL copy of ${backup.filename} to verify against…`));
   const data = await new Promise((resolve) => {
@@ -313,10 +443,15 @@ async function verify(backup) {
     ranges.push({ offset, length });
   }
   const challenge = { nonce: bytesToHex(nonceBytes), ranges };
-  const resp = await fetch(`/api/v1/backups/${backup.backup_id}/challenge`, {
+  const resp = await fetch(`${base}/api/v1/backups/${backup.backup_id}/challenge`, {
     method: 'POST', headers: {'content-type':'application/json'},
     body: JSON.stringify({ challenge })
   });
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({}));
+    renderResult(out, false, `Could not reach${targetLabel || ' this server'}`, body.error || `HTTP ${resp.status}`);
+    return;
+  }
   const { proof, version } = await resp.json();
   const expectedFull = await sha256Concat(nonceBytes, data);
   let ok = proof.full_proof === expectedFull;
@@ -326,10 +461,15 @@ async function verify(backup) {
     ok = proof.range_proofs[i] === expected;
   }
 
-  backupStatus[backup.backup_id] = { ...status(backup.backup_id), verified: ok, verifiedAt: Date.now() };
+  // Only track this-server verify status in the main status badge — a
+  // cross-provider verify is reported inline instead (see renderResult call
+  // below), not folded into the primary OK/failed badge.
+  if (!target) {
+    backupStatus[backup.backup_id] = { ...status(backup.backup_id), verified: ok, verifiedAt: Date.now() };
+  }
   renderResult(
     out, ok,
-    ok ? `Proof-of-storage OK for v${version}` : `PROOF FAILED for v${version} — do not pay`,
+    ok ? `Proof-of-storage OK for v${version}${targetLabel}` : `PROOF FAILED for v${version}${targetLabel} — do not pay`,
     ok ? 'The server read back exactly the bytes it should have — it still has your data.' : 'The server could not prove it holds your data.',
     `nonce:       ${challenge.nonce}\nfull proof:  ${proof.full_proof}\nranges:      ${JSON.stringify(ranges)}`,
   );
@@ -402,7 +542,20 @@ $('discover').onclick = withLoading($('discover'), 'Querying relays…', async (
   for (const { a } of providers) {
     const endpointLink = el('a', '', a.endpoint);
     endpointLink.href = a.endpoint + '/app';
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.dataset.providerEndpoint = a.endpoint;
+    checkbox.checked = selectedProviders.has(a.endpoint);
+    checkbox.onchange = () => {
+      if (checkbox.checked) selectedProviders.set(a.endpoint, { endpoint: a.endpoint, name: a.name });
+      else selectedProviders.delete(a.endpoint);
+      saveSelectedProviders();
+      renderUploadTargets();
+    };
+
     tbody.append(el('tr', '',
+      el('td', '', checkbox),
       el('td', '', a.name),
       el('td', '', `${a.price_sats_per_mib} sats/MiB`),
       el('td', '', el('code', '', (a.bolt12_offer || '').slice(0, 24) + (a.bolt12_offer ? '…' : '(none)'))),
@@ -415,6 +568,7 @@ $('discover').onclick = withLoading($('discover'), 'Querying relays…', async (
 fetchBtcUsd().then(refreshService);
 refreshService();
 refreshBackups();
+renderUploadTargets();
 setInterval(refreshBackups, 5000);
 </script>
 </body>

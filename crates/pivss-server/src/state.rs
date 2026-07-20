@@ -2,7 +2,7 @@
 //! creation, proofs, payments).
 
 use crate::announce::RelayResult;
-use crate::config::Config;
+use crate::config::{Config, MAX_BACKUP_BYTES_CEILING};
 use crate::ln::LnState;
 use crate::seeder::{SeedStatus, Seeder};
 use crate::store::{StoreError, VersionedStore};
@@ -11,8 +11,10 @@ use pivss_core::nostr::{Event, NostrKeys};
 use pivss_core::proof::{compute_proof, StorageChallenge, StorageProof};
 use pivss_core::torrent::create_torrent;
 use pivss_ln::IncomingPayment;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::sync::{Arc, Mutex};
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub fn now_secs() -> u64 {
@@ -23,7 +25,11 @@ pub fn now_secs() -> u64 {
 }
 
 pub struct AppState {
-    pub config: Config,
+    pub config: RwLock<Config>,
+    /// Path the config was loaded from, if any (`--config path/to.toml`).
+    /// `/api/v1/settings` writes changes back here; when `None`, settings
+    /// edits only last for the life of the process.
+    pub config_path: Option<PathBuf>,
     pub store: Arc<dyn VersionedStore>,
     pub seeder: Arc<dyn Seeder>,
     pub keys: NostrKeys,
@@ -48,8 +54,46 @@ pub enum ServiceError {
          (lightning.enable = true) — pay the announced offer instead"
     )]
     MockPaymentsDisabled,
+    #[error("invalid settings: {0}")]
+    InvalidSettings(String),
+    #[error("{0}")]
+    NoRealWallet(String),
     #[error("{0}")]
     Internal(String),
+}
+
+/// Editable subset of `Config`, as exposed by `GET`/`PATCH /api/v1/settings`.
+/// Deliberately excludes anything security- or infra-sensitive (listen addr,
+/// storage backend, nostr secret key, lightning mnemonic/api_key) — those
+/// stay config.toml/CLI-only.
+#[derive(Debug, Clone, Serialize)]
+pub struct SettingsView {
+    pub name: String,
+    pub description: String,
+    pub price_sats_per_mib: u64,
+    pub billing_period_secs: u64,
+    pub max_backup_bytes: u64,
+    pub max_backup_bytes_ceiling: u64,
+    pub relays: Vec<String>,
+    pub bolt12_offer: String,
+    /// Whether `bolt12_offer` above is a static, directly-editable string
+    /// (demo mode) or the live wallet's own offer (only refreshable, not
+    /// freely settable).
+    pub bolt12_editable: bool,
+    /// Whether a `--config` path was loaded — if false, PATCHes here only
+    /// last until the next restart.
+    pub config_persisted: bool,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct SettingsPatch {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub price_sats_per_mib: Option<u64>,
+    pub billing_period_secs: Option<u64>,
+    pub max_backup_bytes: Option<u64>,
+    pub relays: Option<Vec<String>>,
+    pub bolt12_offer: Option<String>,
 }
 
 fn meta_key(id: &str) -> String {
@@ -68,21 +112,155 @@ pub fn backup_id(filename: &str, kind: BackupKind) -> String {
 
 impl AppState {
     pub fn announcement(&self) -> ServiceAnnouncement {
+        let cfg = self.config.read().unwrap();
         let bolt12_offer = match &self.ln {
-            Some(ln) => ln.offer.clone(),
-            None => self.config.bolt12_offer.clone(),
+            Some(ln) => ln.offer(),
+            None => cfg.bolt12_offer.clone(),
         };
         ServiceAnnouncement {
-            name: self.config.name.clone(),
-            description: self.config.description.clone(),
-            endpoint: self.config.public_endpoint.clone(),
+            name: cfg.name.clone(),
+            description: cfg.description.clone(),
+            endpoint: cfg.public_endpoint.clone(),
             bolt12_offer,
-            price_sats_per_mib: self.config.price_sats_per_mib,
-            billing_period_secs: self.config.billing_period_secs,
-            max_backup_bytes: self.config.max_backup_bytes,
+            price_sats_per_mib: cfg.price_sats_per_mib,
+            billing_period_secs: cfg.billing_period_secs,
+            max_backup_bytes: cfg.max_backup_bytes,
             kinds: vec![BackupKind::Lightning, BackupKind::Rgb, BackupKind::Other],
             pivss_version: env!("CARGO_PKG_VERSION").to_string(),
         }
+    }
+
+    pub fn settings_view(&self) -> SettingsView {
+        let cfg = self.config.read().unwrap();
+        let (bolt12_offer, bolt12_editable) = match &self.ln {
+            Some(ln) => (ln.offer(), false),
+            None => (cfg.bolt12_offer.clone(), true),
+        };
+        SettingsView {
+            name: cfg.name.clone(),
+            description: cfg.description.clone(),
+            price_sats_per_mib: cfg.price_sats_per_mib,
+            billing_period_secs: cfg.billing_period_secs,
+            max_backup_bytes: cfg.max_backup_bytes,
+            max_backup_bytes_ceiling: MAX_BACKUP_BYTES_CEILING,
+            relays: cfg.nostr.relays.clone(),
+            bolt12_offer,
+            bolt12_editable,
+            config_persisted: self.config_path.is_some(),
+        }
+    }
+
+    /// Validate and apply a settings patch, persisting to `config_path` when
+    /// set. Returns the resulting view plus whether it was actually written
+    /// to disk this call (false when no `--config` path was loaded).
+    pub fn apply_settings_patch(
+        &self,
+        patch: SettingsPatch,
+    ) -> Result<(SettingsView, bool), ServiceError> {
+        if let Some(price) = patch.price_sats_per_mib {
+            if price == 0 {
+                return Err(ServiceError::InvalidSettings(
+                    "price_sats_per_mib must be at least 1".into(),
+                ));
+            }
+        }
+        if let Some(period) = patch.billing_period_secs {
+            if period < 60 {
+                return Err(ServiceError::InvalidSettings(
+                    "billing_period_secs must be at least 60".into(),
+                ));
+            }
+        }
+        if let Some(max) = patch.max_backup_bytes {
+            if !(1024..=MAX_BACKUP_BYTES_CEILING).contains(&max) {
+                return Err(ServiceError::InvalidSettings(format!(
+                    "max_backup_bytes must be between 1024 and {MAX_BACKUP_BYTES_CEILING}"
+                )));
+            }
+        }
+        let relays = match &patch.relays {
+            Some(relays) => {
+                let mut cleaned = Vec::new();
+                for r in relays {
+                    let r = r.trim();
+                    if r.is_empty() {
+                        continue;
+                    }
+                    if !r.starts_with("ws://") && !r.starts_with("wss://") {
+                        return Err(ServiceError::InvalidSettings(format!(
+                            "relay '{r}' must start with ws:// or wss://"
+                        )));
+                    }
+                    if !cleaned.contains(&r.to_string()) {
+                        cleaned.push(r.to_string());
+                    }
+                }
+                Some(cleaned)
+            }
+            None => None,
+        };
+        if let Some(name) = &patch.name {
+            if name.trim().is_empty() || name.len() > 100 {
+                return Err(ServiceError::InvalidSettings(
+                    "name must be 1-100 characters".into(),
+                ));
+            }
+        }
+        if let Some(desc) = &patch.description {
+            if desc.trim().is_empty() || desc.len() > 500 {
+                return Err(ServiceError::InvalidSettings(
+                    "description must be 1-500 characters".into(),
+                ));
+            }
+        }
+        if patch.bolt12_offer.is_some() && self.ln.is_some() {
+            return Err(ServiceError::InvalidSettings(
+                "bolt12_offer is managed by the connected wallet — use \
+                 POST /api/v1/bolt12/refresh instead of setting it directly"
+                    .into(),
+            ));
+        }
+
+        let updated = {
+            let mut cfg = self.config.write().unwrap();
+            if let Some(v) = patch.name {
+                cfg.name = v.trim().to_string();
+            }
+            if let Some(v) = patch.description {
+                cfg.description = v.trim().to_string();
+            }
+            if let Some(v) = patch.price_sats_per_mib {
+                cfg.price_sats_per_mib = v;
+            }
+            if let Some(v) = patch.billing_period_secs {
+                cfg.billing_period_secs = v;
+            }
+            if let Some(v) = patch.max_backup_bytes {
+                cfg.max_backup_bytes = v;
+            }
+            if let Some(v) = relays {
+                cfg.nostr.relays = v;
+            }
+            if let Some(v) = patch.bolt12_offer {
+                cfg.bolt12_offer = v;
+            }
+            cfg.clone()
+        };
+
+        let persisted = match &self.config_path {
+            Some(path) => match updated.save(path) {
+                Ok(()) => true,
+                Err(e) => {
+                    tracing::error!(error = %e, "failed to persist settings to config.toml");
+                    return Err(ServiceError::Internal(format!(
+                        "settings applied in memory but failed to save to disk: {e}"
+                    )));
+                }
+            },
+            None => false,
+        };
+
+        Ok((self.settings_view(), persisted))
     }
 
     async fn get_manifest(&self, id: &str) -> Result<Option<(BackupManifest, i64)>, ServiceError> {
@@ -105,10 +283,13 @@ impl AppState {
         label: &str,
         data: Vec<u8>,
     ) -> Result<(BackupManifest, BackupVersion, SeedStatus, u64), ServiceError> {
-        if data.len() as u64 > self.config.max_backup_bytes {
+        // Snapshot config up front (Config is small + Clone) so no lock is
+        // held across the `.await`s below.
+        let cfg = self.config.read().unwrap().clone();
+        if data.len() as u64 > cfg.max_backup_bytes {
             return Err(ServiceError::TooLarge(
                 data.len() as u64,
-                self.config.max_backup_bytes,
+                cfg.max_backup_bytes,
             ));
         }
 
@@ -141,17 +322,13 @@ impl AppState {
 
         // 2. Materialize the seed dir + torrent.
         let seed_name = format!("{id}-v{version}-{filename}");
-        let seed_dir = self
-            .config
-            .data_dir
-            .join("seeds")
-            .join(format!("{id}-v{version}"));
+        let seed_dir = cfg.data_dir.join("seeds").join(format!("{id}-v{version}"));
         std::fs::create_dir_all(&seed_dir)
             .map_err(|e| ServiceError::Internal(format!("seed dir: {e}")))?;
         std::fs::write(seed_dir.join(&seed_name), &data)
             .map_err(|e| ServiceError::Internal(format!("seed file: {e}")))?;
 
-        let torrent = create_torrent(&seed_name, &data, &self.config.torrent.trackers);
+        let torrent = create_torrent(&seed_name, &data, &cfg.torrent.trackers);
         let torrent_path = seed_dir.join(format!("{seed_name}.torrent"));
         std::fs::write(&torrent_path, &torrent.metainfo)
             .map_err(|e| ServiceError::Internal(format!("torrent file: {e}")))?;
@@ -184,7 +361,7 @@ impl AppState {
             .put(&meta_key(&id), meta_version, meta_bytes)
             .await?;
 
-        let quote = quote_msat(data.len() as u64, self.config.price_sats_per_mib);
+        let quote = quote_msat(data.len() as u64, cfg.price_sats_per_mib);
         Ok((manifest, backup_version, seed_status, quote))
     }
 

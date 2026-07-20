@@ -33,3 +33,5 @@ breez-wallet/
 /video/uiux-*.png
 /video/verify_ui.js
 /video/verify_panel_ui.js
+/video/verify_settings.js
+/video/verify_multiprovider.js

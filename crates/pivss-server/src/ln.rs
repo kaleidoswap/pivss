@@ -5,13 +5,32 @@
 use crate::config::LightningConfig;
 use pivss_ln::{BreezWallet, IncomingPayment, LiquidNetwork};
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use tokio::sync::mpsc;
 
 pub struct LnState {
     pub wallet: Arc<BreezWallet>,
     /// This provider's durable BOLT12 offer, advertised in the announcement.
-    pub offer: String,
+    /// Behind a lock so `/api/v1/bolt12/refresh` can re-fetch it at runtime.
+    pub offer: RwLock<String>,
+}
+
+impl LnState {
+    pub fn offer(&self) -> String {
+        self.offer.read().unwrap().clone()
+    }
+
+    /// Ask the wallet for its offer again. BOLT12 offers from breez-sdk-liquid
+    /// are durable by design — this will very likely return the *same* offer
+    /// string unless the wallet's own state changed, but it's the only "give
+    /// me a fresh read" primitive the SDK exposes, so that's what this calls.
+    pub async fn refresh_offer(&self, description: &str) -> anyhow::Result<(String, bool)> {
+        let new_offer = self.wallet.receive_offer(description).await?;
+        let mut slot = self.offer.write().unwrap();
+        let changed = *slot != new_offer;
+        *slot = new_offer.clone();
+        Ok((new_offer, changed))
+    }
 }
 
 fn parse_network(s: &str) -> anyhow::Result<LiquidNetwork> {
@@ -70,5 +89,11 @@ pub async fn connect(
 
     let offer = wallet.receive_offer(description).await?;
 
-    Ok((LnState { wallet, offer }, rx))
+    Ok((
+        LnState {
+            wallet,
+            offer: RwLock::new(offer),
+        },
+        rx,
+    ))
 }

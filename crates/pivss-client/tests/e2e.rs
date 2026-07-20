@@ -20,7 +20,7 @@ async fn spawn_server() -> (String, tempdir::TempDirGuard) {
         },
         ..Default::default()
     };
-    let state = pivss_server::build_state(config).await.unwrap();
+    let state = pivss_server::build_state(config, None).await.unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
