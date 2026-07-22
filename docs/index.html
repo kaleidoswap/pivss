@@ -251,6 +251,10 @@
         <img src="screenshot-verify.png" alt="PIVSS client showing real nostr provider discovery results and a successful proof-of-storage verification" loading="lazy">
         <div class="cap"><b>Client</b> — providers found live via nostr, and a real proof-of-storage check that passed.</div>
       </div>
+      <div class="shot">
+        <img src="screenshot-settings.png" alt="PIVSS host panel Settings section with editable price, billing period, max backup size, relay list, and BOLT12 offer" loading="lazy">
+        <div class="cap"><b>Live settings</b> — price, billing period, max size, and relays, editable at runtime.</div>
+      </div>
     </div>
   </div>
 </section>
@@ -308,13 +312,15 @@
           <li>Proof-of-storage: honest / tampered / replayed-nonce, all tested</li>
           <li>Client-side encryption, zero-knowledge server</li>
           <li>Nostr publish + CLI discovery, both signature-verified round-trip (the browser's discovery is an unverified quick-browse, by design)</li>
+          <li>Multi-provider uploads: fan out to any discovered provider in parallel, verify each independently — tested live against two separate running servers</li>
+          <li>Host panel settings (price, billing period, max size, relay list) editable at runtime, validated and persisted to config.toml</li>
           <li>Docker Compose — full loop tested end-to-end through containers</li>
         </ul>
       </div>
       <div class="status-card">
         <h3><span class="dot warn"></span> Still on the roadmap</h3>
         <ul>
-          <li>Multi-provider erasure coding — the real availability guarantee</li>
+          <li>Multi-provider erasure coding — today's redundancy is full copies to each provider; splitting into shares so no single one holds the whole file is the next step</li>
           <li>Anti-outsourcing proofs (a dishonest provider can still proxy a challenge)</li>
           <li>Server-side auth / rate-limiting</li>
           <li>Merkle-commitment proofs for thin clients that don't hold the file</li>
