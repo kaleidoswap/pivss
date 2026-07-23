@@ -284,6 +284,47 @@
   </div>
 </section>
 
+<section id="proof">
+  <div class="wrap">
+    <h2>How the proof works</h2>
+    <p class="section-sub">
+      No Merkle tree. The wallet owns the plaintext, so a fresh-nonce hash
+      challenge is enough to force the provider to read the real bytes back.
+    </p>
+    <div class="trust">
+      <p>The wallet keeps its own copy of every backup it uploaded. Before releasing the next
+      billing period's payment, it sends the provider a challenge: a fresh random
+      <strong>32-byte nonce</strong> plus a few random byte <strong>ranges</strong>.</p>
+
+      <div class="code-block">
+        <pre><span class="comment"># wallet → provider</span>
+challenge   = { nonce: 32 random bytes, ranges: [(offset, length), …] }
+
+<span class="comment"># provider must answer (it has to read the actual bytes)</span>
+full_proof     = SHA256(nonce ‖ file)
+range_proof[i] = SHA256(nonce ‖ file[offset_i .. offset_i + length_i])
+
+<span class="comment"># wallet recomputes from its local copy, pays iff every hash matches</span></pre>
+      </div>
+
+      <p>Because the nonce is fresh per challenge and prefixes the hash, the provider
+      <strong>cannot precompute, cache, or answer from a stored digest</strong> — it has to read the
+      bytes it claims to hold. Stale data, a single flipped byte, or a replayed nonce all fail
+      verification (there are tests for exactly those three cases).</p>
+
+      <p>Since the verifier already holds the whole file, this is a complete possession-and-integrity
+      check with none of the tree machinery. <strong>Merkle-commitment proofs</strong> are on the roadmap
+      for <em>thin</em> clients that keep only a commitment, not the file: challenge random leaves,
+      verify each with a log-sized inclusion proof. The harder open problem is
+      <strong>anti-outsourcing</strong> — a hash challenge alone doesn't stop a provider proxying it to
+      another copy; closing that needs time-bounded or provider-encoded proofs.</p>
+
+      <p style="font-size:13px">~100 lines, worth a read:
+      <a href="https://github.com/kaleidoswap/pivss/blob/main/crates/pivss-core/src/proof.rs">crates/pivss-core/src/proof.rs</a>.</p>
+    </div>
+  </div>
+</section>
+
 <section id="trust">
   <div class="wrap">
     <h2>Trust model</h2>
