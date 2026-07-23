@@ -15,32 +15,9 @@ breez-wallet/
 /.smoke-data*
 .DS_Store
 
-# Video demo generation working files (heavy, regeneratable from capture.js
-# + narration script — see video/README.md if present). Keep the final .mp4
-# out of git too unless deliberately added for the README/Pages site.
-/video/node_modules
-/video/frames
-/video/audio
-/video/scenes
-/video/*.mp4
-/video/concat.txt
-/video/package-lock.json
-
-# Ad-hoc Playwright verification scripts/screenshots (not the demo video
-# itself) — scratch tooling used while iterating on the web UI, not a
-# tracked deliverable.
-/video/uiux/
-/video/uiux-*.png
-/video/verify_ui.js
-/video/verify_panel_ui.js
-/video/verify_settings.js
-/video/verify_multiprovider.js
-/video/verify_landing.js
-/video/verify_brand.js
-/video/verify_brand2.js
-/video/footshot.js
-/video/capture_settings_shot.js
-/video/render_cover.js
-/video/landing-*.png
-/video/brand-*.png
-/video/brand2-*.png
+# Everything under video/ is heavy, regeneratable scratch (Playwright
+# scripts, screenshots, node_modules, demo-video working files). Only the
+# reusable capture harness is tracked.
+/video/*
+!/video/capture.js
+!/video/package.json
