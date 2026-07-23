@@ -83,6 +83,8 @@
   @media (max-width:680px){.problem-grid{grid-template-columns:1fr}}
   .pcard{background:var(--card); border:1px solid var(--line); border-radius:12px; padding:22px}
   .pcard h3{margin:0 0 10px; font-size:16px; font-weight:500; color:var(--acc2)}
+  .pcard h3.ln{color:var(--acc)}
+  .pcard h3.rgb{color:var(--acc2)}
   .pcard p{margin:0; color:var(--dim); font-size:14px}
 
   .steps{display:grid; grid-template-columns:repeat(4,1fr); gap:16px}
@@ -230,7 +232,7 @@
     </p>
     <div class="problem-grid">
       <div class="pcard">
-        <h3>⚡ Lightning channel state</h3>
+        <h3 class="ln">⚡ Lightning channel state</h3>
         <p>
           Every payment changes your channel's commitment state. Restore an old
           backup and you risk broadcasting a revoked commitment — Lightning's penalty
@@ -239,7 +241,7 @@
         </p>
       </div>
       <div class="pcard">
-        <h3>🎨 RGB client-side assets</h3>
+        <h3 class="rgb">🎨 RGB client-side assets</h3>
         <p>
           RGB keeps asset data in your device's local stash — there's no global
           chain to replay it from. Lose the data, lose the asset. This is the
