@@ -66,6 +66,12 @@ pub struct StorageConfig {
     pub backend: String,
     pub vss_url: String,
     pub store_id: String,
+    /// secp256k1 secret key (hex) used to sign VSS requests, for a vss-server
+    /// running the default signature authorizer (e.g. vss.kaleidoswap.com).
+    /// When empty, a key is generated and persisted to `<data_dir>/vss.key`.
+    /// Ignored by the "memory" backend and by a vss-server built with the
+    /// noop authorizer.
+    pub signing_key_hex: String,
 }
 
 impl Default for StorageConfig {
@@ -74,6 +80,7 @@ impl Default for StorageConfig {
             backend: "memory".into(),
             vss_url: "http://127.0.0.1:8080/vss".into(),
             store_id: "pivss".into(),
+            signing_key_hex: String::new(),
         }
     }
 }

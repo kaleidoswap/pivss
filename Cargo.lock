@@ -3359,6 +3359,7 @@ dependencies = [
  "prost 0.13.5",
  "rand 0.8.6",
  "reqwest",
+ "secp256k1 0.29.1",
  "serde",
  "serde_json",
  "sha2 0.10.9",

@@ -13,8 +13,46 @@
 use async_trait::async_trait;
 use pivss_core::proto::*;
 use prost::Message;
+use secp256k1::{PublicKey, Secp256k1, SecretKey};
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+/// 64-byte constant signed to prove private-key knowledge to a vss-server
+/// running the default signature authorizer. Must match, byte for byte,
+/// `SIGNING_CONSTANT` in lightningdevkit/vss-server `auth-impls/src/signature.rs`.
+const VSS_SIGNING_CONSTANT: &[u8] =
+    b"VSS Signature Authorizer Signing Salt Constant..................";
+
+/// Build the `Authorization` header value the vss-server's
+/// `SignatureValidatingAuthorizer` expects:
+///   hex(pubkey_compressed_33) ‖ hex(ecdsa_sig_compact_64) ‖ unix_secs
+/// where the signature is over SHA256(CONSTANT ‖ pubkey ‖ ascii(unix_secs)).
+fn vss_auth_header(signing_key: &SecretKey) -> String {
+    let secp = Secp256k1::signing_only();
+    let pubkey = PublicKey::from_secret_key(&secp, signing_key);
+    let pubkey_bytes = pubkey.serialize(); // 33-byte compressed
+    let time_str = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        .to_string();
+
+    let mut h = Sha256::new();
+    h.update(VSS_SIGNING_CONSTANT);
+    h.update(pubkey_bytes);
+    h.update(time_str.as_bytes());
+    let digest: [u8; 32] = h.finalize().into();
+    let sig = secp.sign_ecdsa(&secp256k1::Message::from_digest(digest), signing_key);
+
+    format!(
+        "{}{}{}",
+        hex::encode(pubkey_bytes),
+        hex::encode(sig.serialize_compact()),
+        time_str
+    )
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -104,14 +142,21 @@ impl VersionedStore for MemoryStore {
 pub struct VssHttpStore {
     base_url: String,
     store_id: String,
+    /// secp256k1 key signing every request for a sig-auth vss-server.
+    signing_key: SecretKey,
     http: reqwest::Client,
 }
 
 impl VssHttpStore {
-    pub fn new(base_url: impl Into<String>, store_id: impl Into<String>) -> Self {
+    pub fn new(
+        base_url: impl Into<String>,
+        store_id: impl Into<String>,
+        signing_key: SecretKey,
+    ) -> Self {
         Self {
             base_url: base_url.into().trim_end_matches('/').to_string(),
             store_id: store_id.into(),
+            signing_key,
             http: reqwest::Client::new(),
         }
     }
@@ -126,6 +171,7 @@ impl VssHttpStore {
             .http
             .post(&url)
             .header("Content-Type", "application/octet-stream")
+            .header("Authorization", vss_auth_header(&self.signing_key))
             .body(req.encode_to_vec())
             .send()
             .await
@@ -182,7 +228,9 @@ impl VersionedStore for VssHttpStore {
             }],
             delete_items: vec![],
         };
-        self.call::<_, PutObjectResponse>("putObject", &req).await?;
+        // Endpoint is plural: vss-server routes writes at `/putObjects`.
+        self.call::<_, PutObjectResponse>("putObjects", &req)
+            .await?;
         // VSS increments server-side; mirror the client-side bookkeeping rule.
         Ok(if version == -1 { 1 } else { version + 1 })
     }
@@ -241,5 +289,57 @@ mod tests {
         let listed = s.list("prefix/").await.unwrap();
         assert_eq!(listed.len(), 2);
         assert!(listed.iter().all(|kv| kv.value.is_empty()));
+    }
+
+    /// Independently verify our `Authorization` header exactly the way
+    /// lightningdevkit/vss-server's `SignatureValidatingAuthorizer` does, so a
+    /// regression in the wire format is caught without a live server. This
+    /// mirrors `auth-impls/src/signature.rs::verify` byte for byte.
+    fn server_side_verify(header: &str) -> Result<String, &'static str> {
+        if header.len() <= (33 + 64) * 2 || !header.is_ascii() {
+            return Err("bad length/chars");
+        }
+        let pubkey_hex = &header[..33 * 2];
+        let sig_hex = &header[33 * 2..(33 + 64) * 2];
+        let time_str = &header[(33 + 64) * 2..];
+
+        let pubkey_bytes = hex::decode(pubkey_hex).map_err(|_| "pubkey not hex")?;
+        let sig_bytes = hex::decode(sig_hex).map_err(|_| "sig not hex")?;
+        let pubkey = PublicKey::from_slice(&pubkey_bytes).map_err(|_| "bad pubkey")?;
+        let sig = secp256k1::ecdsa::Signature::from_compact(&sig_bytes).map_err(|_| "bad sig")?;
+
+        let mut h = Sha256::new();
+        h.update(VSS_SIGNING_CONSTANT);
+        h.update(&pubkey_bytes);
+        h.update(time_str.as_bytes());
+        let digest: [u8; 32] = h.finalize().into();
+        let msg = secp256k1::Message::from_digest(digest);
+
+        Secp256k1::verification_only()
+            .verify_ecdsa(&msg, &sig, &pubkey)
+            .map_err(|_| "signature invalid")?;
+        Ok(pubkey_hex.to_string())
+    }
+
+    #[test]
+    fn vss_auth_header_verifies_like_the_server() {
+        let sk = SecretKey::from_slice(&[42u8; 32]).unwrap();
+        let header = vss_auth_header(&sk);
+
+        // The server accepts it, and attributes it to our pubkey.
+        let expected_pk =
+            hex::encode(PublicKey::from_secret_key(&Secp256k1::new(), &sk).serialize());
+        assert_eq!(server_side_verify(&header).unwrap(), expected_pk);
+
+        // A tampered signature byte is rejected.
+        let mut bad = header.clone().into_bytes();
+        let i = 33 * 2 + 5; // inside the signature region
+        bad[i] = if bad[i] == b'0' { b'1' } else { b'0' };
+        assert!(server_side_verify(&String::from_utf8(bad).unwrap()).is_err());
+
+        // A different key produces a header attributed to that other key.
+        let sk2 = SecretKey::from_slice(&[7u8; 32]).unwrap();
+        let pk2 = hex::encode(PublicKey::from_secret_key(&Secp256k1::new(), &sk2).serialize());
+        assert_eq!(server_side_verify(&vss_auth_header(&sk2)).unwrap(), pk2);
     }
 }

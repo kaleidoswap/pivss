@@ -21,6 +21,26 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 use store::{MemoryStore, VersionedStore, VssHttpStore};
 
+/// Resolve the secp256k1 key used to sign VSS requests: config value if set,
+/// else a key persisted to `<data_dir>/vss.key` (generated on first use). This
+/// key is the provider's VSS "user" — the vss-server isolates stored data by
+/// its public key, so keep `vss.key` alongside the other server secrets.
+fn resolve_vss_signing_key(config: &Config) -> anyhow::Result<secp256k1::SecretKey> {
+    if !config.storage.signing_key_hex.is_empty() {
+        let bytes = hex::decode(config.storage.signing_key_hex.trim())?;
+        return Ok(secp256k1::SecretKey::from_slice(&bytes)?);
+    }
+    let path = config.data_dir.join("vss.key");
+    if path.exists() {
+        let bytes = hex::decode(std::fs::read_to_string(&path)?.trim())?;
+        Ok(secp256k1::SecretKey::from_slice(&bytes)?)
+    } else {
+        let sk = secp256k1::SecretKey::new(&mut rand::thread_rng());
+        std::fs::write(&path, hex::encode(sk.secret_bytes()))?;
+        Ok(sk)
+    }
+}
+
 /// Wire up state from config: storage backend, seeder, nostr identity.
 ///
 /// `config_path` is threaded through so `/api/v1/settings` can persist edits
@@ -33,10 +53,14 @@ pub async fn build_state(
     std::fs::create_dir_all(&config.data_dir)?;
 
     let store: Arc<dyn VersionedStore> = match config.storage.backend.as_str() {
-        "vss" => Arc::new(VssHttpStore::new(
-            config.storage.vss_url.clone(),
-            config.storage.store_id.clone(),
-        )),
+        "vss" => {
+            let signing_key = resolve_vss_signing_key(&config)?;
+            Arc::new(VssHttpStore::new(
+                config.storage.vss_url.clone(),
+                config.storage.store_id.clone(),
+                signing_key,
+            ))
+        }
         "memory" => Arc::new(MemoryStore::default()),
         other => anyhow::bail!("unknown storage backend: {other} (use \"memory\" or \"vss\")"),
     };

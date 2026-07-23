@@ -30,6 +30,11 @@ bolt12_offer = ""
 backend = "memory"
 vss_url = "http://127.0.0.1:8080/vss"
 store_id = "pivss"
+# secp256k1 secret key (hex) that signs VSS requests, for a vss-server running
+# the default signature authorizer (e.g. https://vss.kaleidoswap.com/vss).
+# Leave empty to generate + persist one to <data_dir>/vss.key. Ignored by the
+# "memory" backend and by a noop-authorizer vss-server.
+signing_key_hex = ""
 
 [nostr]
 # hex secret key; generated & persisted to <data_dir>/nostr.key when empty.
