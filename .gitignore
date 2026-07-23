@@ -36,6 +36,8 @@ breez-wallet/
 /video/verify_settings.js
 /video/verify_multiprovider.js
 /video/verify_landing.js
+/video/verify_brand.js
 /video/capture_settings_shot.js
 /video/render_cover.js
 /video/landing-*.png
+/video/brand-*.png
