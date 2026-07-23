@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PIVSS — P2P Incentivized Versioned Storage Service</title>
 <meta name="description" content="Incentivized, provable backups for Lightning and RGB wallet state. Providers get paid in sats — only while they can prove the data is still there.">
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJnIiB4MT0iMCIgeTE9IjAiIHgyPSIyNCIgeTI9IjI0IiBncmFkaWVudFVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PHN0b3Agc3RvcC1jb2xvcj0iIzE1RTk5QSIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzZGMzJGRiIvPjwvbGluZWFyR3JhZGllbnQ+PC9kZWZzPjxyZWN0IHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgcng9IjYiIGZpbGw9InVybCgjZykiLz48cGF0aCBkPSJNMTIgNWw1IDIuMnYzLjZjMCAzLjItMi4xIDUuNy01IDYuNC0yLjktLjctNS0zLjItNS02LjRWNy4yTDEyIDV6IiBmaWxsPSIjMEQxODEzIi8+PHBhdGggZD0iTTkuNSAxMmwxLjggMS44TDE1IDEwIiBzdHJva2U9IiMxNUU5OUEiIHN0cm9rZS13aWR0aD0iMS43IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiIGZpbGw9Im5vbmUiLz48L3N2Zz4=">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHJlY3Qgd2lkdGg9IjI0IiBoZWlnaHQ9IjI0IiByeD0iNiIgZmlsbD0iIzBEMTgxMyIvPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDMuNyAzLjcpIHNjYWxlKDAuMDc4MSkiPjxwYXRoIGQ9Ik02OS43MTQxIDIwNy4zSDAuOTA4MjAzTDM1LjMyNDMgMTcyLjkzNkw2OS43MTQxIDIwNy4zWiIgZmlsbD0iIzZGMzJGRiIvPjxwYXRoIGQ9Ik0xMzguNDQxIDAuOTYxMDZWNjkuNzY3TDEwNC4wNzggMzUuMzUwOEwxMzguNDQxIDAuOTYxMDZaIiBmaWxsPSIjMTdCNTgxIi8+PHBhdGggZD0iTTEzOC40MTUgMTM4LjU0N1YyMDcuMzUyTDEwNC4wNTEgMTcyLjkzNkwxMzguNDE1IDEzOC41NDdaIiBmaWxsPSIjMTdCNTgxIi8+PHBhdGggZD0iTTEzOC40NDEgNjkuNzQwNlYwLjk2MTA2TDE3Mi44MDQgMzUuMzc3MkwxMzguNDQxIDY5Ljc2N1Y2OS43NDA2WiIgZmlsbD0iIzE3QjU4MSIvPjxwYXRoIGQ9Ik02OS42NjE0IDEzOC40OTRWNjkuNjg3OUwxMDQuMDI1IDEwNC4xMDRMNjkuNjYxNCAxMzguNDk0WiIgZmlsbD0iIzE1RTk5QSIvPjxwYXRoIGQ9Ik02OS42NjE1IDY5LjcxNDJWMTM4LjUyTDM1LjI5ODEgMTA0LjEwNEw2OS42NjE1IDY5LjcxNDJaIiBmaWxsPSIjMTVFOTlBIi8+PHBhdGggZD0iTTEzOC40NjcgMjA3LjM3OVYxMzguNTczTDE3Mi44MzEgMTcyLjk4OUwxMzguNDY3IDIwNy4zNzlaIiBmaWxsPSIjMTdCNTgxIi8+PHBhdGggZD0iTTAuOTA4MjAzIDAuOTA4MzI1SDY5LjcxNDFMMzUuMjk4IDM1LjI3MThMMC45MDgyMDMgMC45MDgzMjVaIiBmaWxsPSIjNkYzMkZGIi8+PHBhdGggZD0iTTIwNy4yMiAyMDcuM0gxMzguNDE1TDE3Mi44MzEgMTcyLjkzNkwyMDcuMjIgMjA3LjNaIiBmaWxsPSIjMTdCNTgxIi8+PHBhdGggZD0iTTEzOC40MTUgMC45ODc0MjdIMjA3LjIyTDE3Mi44MDQgMzUuMzUwOUwxMzguNDE1IDAuOTg3NDI3WiIgZmlsbD0iIzE3QjU4MSIvPjxwYXRoIGQ9Ik0xMzguNDY3IDY5LjcxNDNINjkuNjYxNEwxMDQuMDc4IDM1LjM1MDhMMTM4LjQ2NyA2OS43MTQzWiIgZmlsbD0iIzE3QjU4MSIvPjxwYXRoIGQ9Ik02OS42MzUgMTM4LjQ5NEgxMzguNDQxTDEwNC4wMjUgMTcyLjg1N0w2OS42MzUgMTM4LjQ5NFoiIGZpbGw9IiMxN0I1ODEiLz48cGF0aCBkPSJNMTM4LjQxNSAxMzguNDk0SDY5LjYzNUwxMDQuMDI1IDEwNC4xNTdMMTM4LjM4OCAxMzguNDk0SDEzOC40MTVaIiBmaWxsPSIjMTVFOTlBIi8+PHBhdGggZD0iTTEzOC40MTUgNjkuNzE0MkwxMDQuMDUxIDEwNC4wNTFMNjkuNjYxNCA2OS43MTQySDEzOC40NDFIMTM4LjQxNVoiIGZpbGw9IiMxNUU5OUEiLz48L2c+PC9zdmc+">
 
 <meta property="og:type" content="website">
 <meta property="og:title" content="PIVSS — Never lose your Lightning channels or RGB assets">
@@ -41,8 +41,8 @@
     border-bottom:1px solid var(--line-soft);
     text-align:center;
   }
-  .lockup{display:inline-flex; align-items:center; gap:10px; margin-bottom:28px}
-  .lockup .mark{width:30px; height:30px; border-radius:8px; background:var(--grad)}
+  .lockup{display:inline-flex; align-items:center; gap:11px; margin-bottom:28px}
+  .lockup .kmark{width:34px; height:34px; display:block}
   .lockup .name{font-weight:700; font-size:18px; letter-spacing:-.01em; color:var(--text)}
   .lockup .name span{color:var(--dim); font-weight:400}
   .kicker{
@@ -142,6 +142,7 @@
 
   footer{padding:48px 0 64px; text-align:center; color:var(--dim); font-size:13.5px}
   footer a{color:var(--dim); text-decoration:underline; text-decoration-color:var(--line)}
+  footer .kmark-foot{width:32px; height:32px; display:block; margin:0 auto 22px; opacity:.9}
   footer .links{display:flex; gap:20px; justify-content:center; margin-bottom:20px; flex-wrap:wrap}
 
   ::selection{background:rgba(21,233,154,.25)}
@@ -151,7 +152,25 @@
 
 <header class="hero">
   <div class="wrap">
-    <div class="lockup"><span class="mark"></span><span class="name">PIVSS <span>by KaleidoSwap</span></span></div>
+    <div class="lockup">
+      <svg class="kmark" viewBox="0 0 210 210" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M69.7141 207.3H0.908203L35.3243 172.936L69.7141 207.3Z" fill="#6F32FF"/>
+        <path d="M138.441 0.96106V69.767L104.078 35.3508L138.441 0.96106Z" fill="#17B581"/>
+        <path d="M138.415 138.547V207.352L104.051 172.936L138.415 138.547Z" fill="#17B581"/>
+        <path d="M138.441 69.7406V0.96106L172.804 35.3772L138.441 69.767V69.7406Z" fill="#17B581"/>
+        <path d="M69.6614 138.494V69.6879L104.025 104.104L69.6614 138.494Z" fill="#15E99A"/>
+        <path d="M69.6615 69.7142V138.52L35.2981 104.104L69.6615 69.7142Z" fill="#15E99A"/>
+        <path d="M138.467 207.379V138.573L172.831 172.989L138.467 207.379Z" fill="#17B581"/>
+        <path d="M0.908203 0.908325H69.7141L35.298 35.2718L0.908203 0.908325Z" fill="#6F32FF"/>
+        <path d="M207.22 207.3H138.415L172.831 172.936L207.22 207.3Z" fill="#17B581"/>
+        <path d="M138.415 0.987427H207.22L172.804 35.3509L138.415 0.987427Z" fill="#17B581"/>
+        <path d="M138.467 69.7143H69.6614L104.078 35.3508L138.467 69.7143Z" fill="#17B581"/>
+        <path d="M69.635 138.494H138.441L104.025 172.857L69.635 138.494Z" fill="#17B581"/>
+        <path d="M138.415 138.494H69.635L104.025 104.157L138.388 138.494H138.415Z" fill="#15E99A"/>
+        <path d="M138.415 69.7142L104.051 104.051L69.6614 69.7142H138.441H138.415Z" fill="#15E99A"/>
+      </svg>
+      <span class="name">PIVSS <span>by KaleidoSwap</span></span>
+    </div>
     <span class="kicker">Open source · MIT · Rust</span>
     <h1><span class="accent">Never lose</span> your Lightning channels<br>or RGB assets</h1>
     <p class="lede">
@@ -344,12 +363,28 @@
 
 <footer>
   <div class="wrap">
+    <svg class="kmark-foot" viewBox="0 0 210 210" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <path d="M69.7141 207.3H0.908203L35.3243 172.936L69.7141 207.3Z" fill="#6F32FF"/>
+      <path d="M138.441 0.96106V69.767L104.078 35.3508L138.441 0.96106Z" fill="#17B581"/>
+      <path d="M138.415 138.547V207.352L104.051 172.936L138.415 138.547Z" fill="#17B581"/>
+      <path d="M138.441 69.7406V0.96106L172.804 35.3772L138.441 69.767V69.7406Z" fill="#17B581"/>
+      <path d="M69.6614 138.494V69.6879L104.025 104.104L69.6614 138.494Z" fill="#15E99A"/>
+      <path d="M69.6615 69.7142V138.52L35.2981 104.104L69.6615 69.7142Z" fill="#15E99A"/>
+      <path d="M138.467 207.379V138.573L172.831 172.989L138.467 207.379Z" fill="#17B581"/>
+      <path d="M0.908203 0.908325H69.7141L35.298 35.2718L0.908203 0.908325Z" fill="#6F32FF"/>
+      <path d="M207.22 207.3H138.415L172.831 172.936L207.22 207.3Z" fill="#17B581"/>
+      <path d="M138.415 0.987427H207.22L172.804 35.3509L138.415 0.987427Z" fill="#17B581"/>
+      <path d="M138.467 69.7143H69.6614L104.078 35.3508L138.467 69.7143Z" fill="#17B581"/>
+      <path d="M69.635 138.494H138.441L104.025 172.857L69.635 138.494Z" fill="#17B581"/>
+      <path d="M138.415 138.494H69.635L104.025 104.157L138.388 138.494H138.415Z" fill="#15E99A"/>
+      <path d="M138.415 69.7142L104.051 104.051L69.6614 69.7142H138.441H138.415Z" fill="#15E99A"/>
+    </svg>
     <div class="links">
       <a href="https://github.com/kaleidoswap/pivss">GitHub</a>
       <a href="https://github.com/kaleidoswap/pivss#readme">Documentation</a>
       <a href="https://github.com/kaleidoswap/pivss/blob/main/LICENSE">MIT License</a>
     </div>
-    PIVSS — P2P Incentivized Versioned Storage Service. Built on
+    A <a href="https://kaleidoswap.com">KaleidoSwap</a> project. Built on
     <a href="https://github.com/lightningdevkit/vss-server">LDK VSS</a>,
     <a href="https://github.com/breez/breez-sdk-liquid">breez-sdk-liquid</a>,
     <a href="https://github.com/vincenzopalazzo/carl">carl</a>, and nostr.
