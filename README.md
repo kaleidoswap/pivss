@@ -57,7 +57,8 @@ encrypt, `pivss-core::crypto` is an optional AES-256-GCM / Argon2id helper
 concern by design, not the server's.
 
 Availability is *not* yet trustless with a single provider — that's what the
-multi-provider erasure-coding roadmap item below addresses. Today a provider
+multi-provider erasure-coding roadmap item below addresses (the web client
+can already push full copies to several providers — see below). Today a provider
 can still go offline; it just can't lie about holding your data (proof-of-
 storage) or read it (encryption).
 
@@ -84,6 +85,20 @@ web client — pick a file, upload it, verify proof-of-storage, pay, and
 required. The **http://localhost:8339/panel** host view shows what the
 server sees (offer, backups, seeding, earnings) and publishes its own
 announcement.
+
+- **Live-editable settings** — the panel's Settings section changes price,
+  billing period, max backup size, name/description and the nostr relay list
+  at runtime (`GET`/`PATCH /api/v1/settings`). Changes are validated
+  server-side and written back to the `--config` file so they survive a
+  restart (the Docker setup mounts `config.docker.toml` read-only, so there
+  they apply in memory only). With a real wallet connected,
+  the BOLT12 offer gets a "Refresh offer" action instead of a free-text field.
+- **Multi-provider upload** — in the client app, tick providers found via
+  **Discover**: an upload then goes to this server *and* every checked
+  provider in parallel, with a result row per provider. The app remembers
+  (locally, per device) where each backup was pushed and can verify
+  proof-of-storage against each copy. These are full replicas, not
+  erasure-coded shards.
 
 Prefer the CLI, or want to script `watch`? It's dockerized too, no local Rust
 needed — put files to upload in `./uploads/`:
@@ -139,7 +154,11 @@ cargo run -p pivss-client -- discover
 
 - **VSS backend** — run [vss-server](https://github.com/lightningdevkit/vss-server)
   and set `storage.backend = "vss"` + `storage.vss_url` in `config.toml`.
-  PIVSS speaks its protobuf API (`putObject`/`getObject`/`listKeyVersions`).
+  PIVSS speaks its protobuf API (`putObjects`/`getObject`/`listKeyVersions`)
+  and signs every request with the secp256k1 signature auth the default
+  vss-server enforces (e.g. `https://vss.kaleidoswap.com/vss`): set
+  `storage.signing_key_hex`, or leave it empty to generate and persist a key
+  to `<data_dir>/vss.key`.
   Note VSS keeps only the latest value per key (its version is an
   optimistic-concurrency counter), so PIVSS stores each backup version under
   its own key — that's what makes history retention and per-version torrents
@@ -186,6 +205,8 @@ cargo run -p pivss-client -- discover
 | `POST /api/v1/backups/{id}/challenge` | proof-of-storage challenge |
 | `POST /api/v1/backups/{id}/payments` | record a client-asserted payment — **403 whenever a real wallet is connected** (`lightning.enable = true`); demo/CI only |
 | `GET /api/v1/payments` | payments received |
+| `GET` / `PATCH /api/v1/settings` | read / update the live-editable settings (persisted to the `--config` file when writable) |
+| `POST /api/v1/bolt12/refresh` | ask the connected wallet for its BOLT12 offer again |
 | `POST /api/v1/announce` (`{"dry_run":true}` to preview) | sign + publish the nostr announcement |
 
 ## Roadmap
@@ -236,3 +257,9 @@ type-checking against the pinned SDK version, a clean workspace build, and a
 manual run confirming the server fails fast with a clear error when
 `lightning.enable = true` and no regtest stack is reachable — not yet by an
 end-to-end real payment.
+
+---
+
+For a walkthrough of how the proof works, check the dedicated [landing page](<https://kaleidoswap.github.io/pivss/>). 
+
+For how PIVSS relates to the [Storm](https://github.com/Storm-WG/storm-spec) storage spec, see [COMPARISON.md](COMPARISON.md).
