@@ -6,11 +6,6 @@ advertise themselves on **nostr** with a price in sats and a **BOLT12 offer**,
 and get paid recurringly — but only while they can *prove* they still hold the
 data.
 
-Landing page with a walkthrough of how the proof works:
-<https://kaleidoswap.github.io/pivss/>. For how PIVSS relates to the
-[Storm](https://github.com/Storm-WG/storm-spec) storage spec, see
-[COMPARISON.md](COMPARISON.md).
-
 ```
 ┌──────────┐  upload backup (versioned)   ┌──────────────┐   putObject     ┌────────────┐
 │  client   │ ───────────────────────────▶ │ pivss-server │ ──────────────▶ │ VSS store  │
@@ -262,3 +257,9 @@ type-checking against the pinned SDK version, a clean workspace build, and a
 manual run confirming the server fails fast with a clear error when
 `lightning.enable = true` and no regtest stack is reachable — not yet by an
 end-to-end real payment.
+
+---
+
+For a walkthrough of how the proof works, check the dedicated [landing page](<https://kaleidoswap.github.io/pivss/>). 
+
+For how PIVSS relates to the [Storm](https://github.com/Storm-WG/storm-spec) storage spec, see [COMPARISON.md](COMPARISON.md).
